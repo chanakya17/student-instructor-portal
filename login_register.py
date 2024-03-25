@@ -65,7 +65,7 @@ def login():
     password = login_password_entry.get()
     clear_entry_boxes()
     cursor.execute('''
-        SELECT * FROM users WHERE username = ? AND password = ?
+        SELECT * FROM users WHERE user_id = ? AND password = ?
     ''', (username, password))
 
     user = cursor.fetchone()
@@ -73,8 +73,16 @@ def login():
     if user:
         messagebox.showinfo("Login", f"Logged in as {username}")
         root.destroy()
-        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\student_dashboard.py', username], check=True)
-        
+        cursor.execute("SELECT role FROM users WHERE user_id = ?",(username,))
+        result=cursor.fetchone()
+        role = result[0]
+        print(role)
+        if role == 'Student':
+            subprocess.run(['python', 'E:\cmu\BIS 698\misc code\student_dashboard.py', username], check=True)
+        elif role == 'Instructor':
+            subprocess.run(['python', 'E:\cmu\BIS 698\misc code\instructor_dashboard.py', username], check=True)
+        else:
+            subprocess.run(['python', 'E:\cmu\BIS 698\misc code\admin_dashboard.py', username], check=True)
     else:
         messagebox.showerror("Error", "Invalid username or password")
     
@@ -90,10 +98,11 @@ def register():
         messagebox.showerror("Error", "Please fill in all the required fields.")
         return  # Exit the function if any entry is missing
     username = generate_username()
+    print(username)
     clear_entry_boxes()
     try:
         cursor.execute('''
-            INSERT INTO users (first_name, last_name, role, class, username, password)
+            INSERT INTO users (first_name, last_name, role, class, user_id, password)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (first_name, last_name, role, class_selected, username, password))
         conn.commit()
