@@ -40,13 +40,13 @@ class StudentDashboard(tk.Tk):
         sd_last_name_label = ttk.Label(details_frame, text=self.lastname)
         sd_last_name_label.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
-        ttk.Label(details_frame, text="Class: ").grid(row=2, column=0, padx=5, pady=5, sticky="e")
-        sd_class_label = ttk.Label(details_frame, text=self.cls)
-        sd_class_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        # ttk.Label(details_frame, text="Class: ").grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        # sd_class_label = ttk.Label(details_frame, text=self.cls)
+        # sd_class_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
 
-        ttk.Label(details_frame, text="Username: ").grid(row=3, column=0, padx=5, pady=5, sticky="e")
+        ttk.Label(details_frame, text="Username: ").grid(row=2, column=0, padx=5, pady=5, sticky="e")
         sd_username_label = ttk.Label(details_frame, text=self.username)
-        sd_username_label.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+        sd_username_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
 
         # Frame for buttons
         button_frame = ttk.Frame(self)
@@ -79,8 +79,9 @@ class StudentDashboard(tk.Tk):
         print("Button 2 clicked")
 
     def grades_button_click(self):
+        # Add functionality for button 3
         self.destroy()
-        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\student_grade.py', username], check=True)
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\instructor_grade.py', username], check=True)
         print("Button 3 clicked")
 
     def notifications_button_click(self):
@@ -99,7 +100,7 @@ if len(sys.argv) >= 2:
     username = sys.argv[1]
     print(f"Username received in student_dashboard.py: {username}")
 else:
-    username = 'ander1e'
+    username = 'mechi1c'
 
 # Create an instance of the StudentDashboard class
 app = StudentDashboard(username)

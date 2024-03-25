@@ -10,7 +10,7 @@ class User:
             cursor = self.conn.cursor()
             cursor.execute(f'''
                 SELECT {detail} FROM users
-                WHERE username = ?
+                WHERE user_id = ?
             ''', (username,))
             result = cursor.fetchone()
             return result[0] if result else None
