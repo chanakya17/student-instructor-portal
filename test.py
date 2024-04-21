@@ -1,15 +1,32 @@
 import sqlite3
+import random
 
 # Connect to the SQLite database
 conn = sqlite3.connect('user.db')
+cursor = conn.cursor()
 
-# Create a cursor object
-c = conn.cursor()
-student_id = 'ander1e'
-courses = c.execute('''SELECT course_name 
-                    FROM course 
-                    JOIN section ON course.course_id = section.course_id 
-                    JOIN course_reg ON section.section_id = course_reg.section_id 
-                    WHERE course_reg.student_id=? AND course_reg.status = 'y' ''', (student_id,)).fetchall()
+try:
+    # Fetch all rows where the role is 'student'
+    cursor.execute("SELECT user_id FROM users WHERE role = 'Student'")
+    student_ids = cursor.fetchall()
+    print(student_ids)
+    # Update class for each student
+    for student_id_tuple in student_ids:
+        student_id = student_id_tuple[0]  # Extract student_id from the tuple
+        # Generate a random class value between 9 and 12 for each student
+        random_class = random.randint(9, 12)
 
-print(courses[0])
+        # Update the class for the current student
+        cursor.execute("UPDATE users SET class = ? WHERE user_id = ?", (random_class, student_id))
+
+    # Commit the transaction
+    conn.commit()
+
+    print("Class updated successfully.")
+
+except sqlite3.Error as e:
+    print("Error occurred:", e)
+
+finally:
+    # Close the database connection
+    conn.close()

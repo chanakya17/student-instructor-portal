@@ -3,11 +3,15 @@ from tkinter import ttk
 import sys
 from database import User
 import subprocess
+from tkinter import font
 
 class StudentDashboard(tk.Tk):
     def __init__(self, username):
         super().__init__()
         self.title("Student Dashboard")
+        self.state('zoomed')
+        self.geometry("900x600")
+        self.configure(bg="#00415a") 
 
         self.user = User()
         self.username = username
@@ -17,93 +21,84 @@ class StudentDashboard(tk.Tk):
         self.cls = self.user.get_details('class', username)
 
         # Load an image (replace 'your_image_path.jpg' with the actual path to your image)
-        self.image_path = "E:/cmu/BIS 698/misc code/OIG2.png"
+        # self.image_path = "E:/cmu/BIS 698/misc code/OIG2.png"
+        # self.image = tk.PhotoImage(file=self.image_path)
+        self.image_path = "E:/cmu/BIS 698/misc code/cmu high scl.png"
         self.image = tk.PhotoImage(file=self.image_path)
 
         self.create_widgets()
 
     def create_widgets(self):
+        fg="white"
+        bg="#00415a"
+        custom_font = font.Font(family="Arial", size=24, weight="bold")
         # Create a label to display the image
-        image_label = tk.Label(self, image=self.image)
-        image_label.pack()
+        self.image_label = tk.Label(self, image=self.image)
+        self.image_label.place(relx=0.5, rely=0.0, anchor=tk.N)
+        # self.welcome_label = tk.Label(self, text="Welcome ", 
+        #                               foreground=fg,
+        #                               background=bg,
+        #                               font=custom_font)
+        # self.welcome_label.place(relx=0.05, rely=0.4, anchor=tk.W)
+        self.firstname_label = tk.Label(self, text=('Welcome'+' '+self.firstname +' '+ self.lastname), 
+                                        foreground=fg,
+                                        background=bg,
+                                        font=custom_font)
+        self.firstname_label.place(relx=0.05, rely=0.4, anchor=tk.W)
 
-        # Frame for student details
-        details_frame = ttk.Frame(self)
-        details_frame.pack(pady=10)
+        
+        # # Labels and entry widgets for student details
+        # self.firstname_label = tk.Label(self, text="First Name: ", foreground=fg, background=bg)
+        # self.firstname_label.place(relx=0.2, rely=0.6, anchor=tk.W)
+        # self.firstname_value_label = tk.Label(self, text=self.firstname, foreground=fg, background=bg)
+        # self.firstname_value_label.place(relx=0.4, rely=0.6, anchor=tk.W)
 
-        # Labels and entry widgets for student details
-        ttk.Label(details_frame, text="First Name: ").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        sd_first_name_label = ttk.Label(details_frame, text=self.firstname)
-        sd_first_name_label.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        # self.lastname_label = tk.Label(self, text="Last Name: ", foreground=fg, background=bg)
+        # self.lastname_label.place(relx=0.2, rely=0.65, anchor=tk.W)
+        # self.lastname_value_label = tk.Label(self, text=self.lastname, foreground=fg, background=bg)
+        # self.lastname_value_label.place(relx=0.4, rely=0.65, anchor=tk.W)
 
-        ttk.Label(details_frame, text="Last Name: ").grid(row=1, column=0, padx=5, pady=5, sticky="e")
-        sd_last_name_label = ttk.Label(details_frame, text=self.lastname)
-        sd_last_name_label.grid(row=1, column=1, padx=5, pady=5, sticky="w")
-
-        # ttk.Label(details_frame, text="Class: ").grid(row=2, column=0, padx=5, pady=5, sticky="e")
-        # sd_class_label = ttk.Label(details_frame, text=self.cls)
-        # sd_class_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
-
-        ttk.Label(details_frame, text="Username: ").grid(row=2, column=0, padx=5, pady=5, sticky="e")
-        sd_username_label = ttk.Label(details_frame, text=self.username)
-        sd_username_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
-
-        # Frame for buttons
-        button_frame = ttk.Frame(self)
-        button_frame.pack()
+        # self.username_label = tk.Label(self, text="Username: ", foreground=fg, background=bg)
+        # self.username_label.place(relx=0.2, rely=0.7, anchor=tk.W)
+        # self.username_value_label = tk.Label(self, text=self.username, foreground=fg, background=bg)
+        # self.username_value_label.place(relx=0.4, rely=0.7, anchor=tk.W)
 
         # Buttons
-        course_reg_button = ttk.Button(button_frame, text="Course Registration", command=self.course_reg_button_click)
-        course_reg_button.grid(row=0, column=0, padx=5, pady=5)
-
-        attendence_button = ttk.Button(button_frame, text="Attendance", command=self.attendence_button_click)
-        attendence_button.grid(row=0, column=1, padx=5, pady=5)
-
-        grades_button = ttk.Button(button_frame, text="Grades", command=self.grades_button_click)
-        grades_button.grid(row=0, column=2, padx=5, pady=5)
-
-        notifications_button = ttk.Button(button_frame, text="Notifications", command=self.notifications_button_click)
-        notifications_button.grid(row=0, column=3, padx=5, pady=5)
-
-        logout_button = ttk.Button(button_frame, text="Logout", command=self.logout_button_click)
-        logout_button.grid(row=1, column=2, padx=5, pady=5)
+        self.course_reg_button = tk.Button(self, text="Course Registration", command=self.course_reg_button_click, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        self.course_reg_button.place(relx=0.7, rely=0.4, anchor=tk.W)
+        self.attendance_button = tk.Button(self, text="Attendance", command=self.attendence_button_click, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        self.attendance_button.place(relx=0.7, rely=0.5, anchor=tk.W)
+        self.grades_button = tk.Button(self, text="Grades", command=self.grades_button_click, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        self.grades_button.place(relx=0.7, rely=0.6, anchor=tk.W)
+        self.logout_button = tk.Button(self, text="Logout", command=self.logout_button_click, bg='#87CEEB', font=('Arial', 10, 'bold'))
+        self.logout_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
 
     def course_reg_button_click(self):
-        # Add functionality for button 1
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\course_reg_instructor.py', username], check=True)
         print("Button 1 clicked")
 
     def attendence_button_click(self):
-        # Add functionality for button 2
         self.destroy()
         subprocess.run(['python', r'E:\cmu\BIS 698\misc code\attendence_try.py', username], check=True)
         print("Button 2 clicked")
 
     def grades_button_click(self):
-        # Add functionality for button 3
         self.destroy()
         subprocess.run(['python', r'E:\cmu\BIS 698\misc code\instructor_grade.py', username], check=True)
         print("Button 3 clicked")
-
-    def notifications_button_click(self):
-        # Add functionality for button 4
-        print("Button 4 clicked")
     
     def logout_button_click(self):
-        #add functionality for button 4
         self.destroy()
         subprocess.run(['python', r'E:\cmu\BIS 698\misc code\login_register.py', username], check=True)
         print("Logout button clicked")
 
 
-# Retrieve the username from command-line arguments
+# Retrieving the username from command-line arguments
 if len(sys.argv) >= 2:
     username = sys.argv[1]
     print(f"Username received in student_dashboard.py: {username}")
 else:
-    username = 'mechi1c'
-
-# Create an instance of the StudentDashboard class
+    username = 'kumar1v'
 app = StudentDashboard(username)
-
-# Run the Tkinter main loop
 app.mainloop()
