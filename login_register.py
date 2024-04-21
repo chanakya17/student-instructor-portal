@@ -141,11 +141,11 @@ def register():
 
 def send_email(receiver_email, username,first_name,last_name):
     try:
-        sender_email = "cmuhighscl@gmail.com"  # Your email address
+        sender_email = ""  # Your email address
         smtp_server = "smtp.gmail.com"  # Your SMTP server address
         smtp_port = 587  # Your SMTP port
         smtp_username = sender_email  # Your SMTP username
-        smtp_password = "oixlkevvlbobqicl"  # Your SMTP password
+        smtp_password = ""  # Your SMTP password
 
         msg = MIMEMultipart()
         msg['From'] = sender_email

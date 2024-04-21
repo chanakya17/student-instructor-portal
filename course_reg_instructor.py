@@ -96,7 +96,7 @@ class InstructorApprovalView(tk.Tk):
                 return
             first_name, last_name, student_email = student_info
 
-            sender_email = "cmuhighscl@gmail.com"  # Your email address
+            sender_email = ""  # Your email address
             receiver_email = student_email  # Student's email address
 
             if action == "Course Registration Request Approved":
@@ -125,7 +125,7 @@ class InstructorApprovalView(tk.Tk):
             smtp_server = "smtp.gmail.com"  # Your SMTP server address
             smtp_port = 587  # Your SMTP port
             smtp_username = sender_email  # Your SMTP username
-            smtp_password = "oixlkevvlbobqicl"  # Your SMTP password
+            smtp_password = ""  # Your SMTP password
 
             server = smtplib.SMTP(smtp_server, smtp_port)
             server.starttls()

@@ -122,7 +122,7 @@ class RegisteredCoursesView(tk.Tk):
 
     def send_email_to_instructor(self, instructor_email, section_id, request_id):
         try:
-            sender_email = "cmuhighscl@gmail.com"  # Your email address
+            sender_email = ""  # Your email address
             receiver_email = instructor_email  # Instructor's email address
             subject = f"Course Drop Request: {section_id}"
             message = f"New Course Drop Request\n\nRequest ID: {request_id}\nSection ID: {section_id}.\n\n\nBest Regards,\nYour School Name"
@@ -140,7 +140,7 @@ class RegisteredCoursesView(tk.Tk):
             smtp_server = "smtp.gmail.com"  # Your SMTP server address
             smtp_port = 587  # Your SMTP port
             smtp_username = sender_email  # Your SMTP username
-            smtp_password = "oixlkevvlbobqicl"  # Your SMTP password
+            smtp_password = ""  # Your SMTP password
 
             server = smtplib.SMTP(smtp_server, smtp_port)
             server.starttls()
