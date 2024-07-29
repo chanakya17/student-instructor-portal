@@ -1,0 +1,2383 @@
+
+**********************************************************************************************************************************************************************************
+Login and Register Page(login_register.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+import subprocess
+import re
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+# Create a connection to the SQLite database
+conn = sqlite3.connect('user.db')
+cursor = conn.cursor()
+
+def clear_entry_boxes():
+    login_username_entry.delete(0, tk.END)
+    login_password_entry.delete(0, tk.END)
+    register_first_name_entry.delete(0, tk.END)
+    register_last_name_entry.delete(0, tk.END)
+    register_password_entry.delete(0, tk.END)
+    register_email_entry.delete(0, tk.END)  # Clear email entry
+
+def switch_to_login_page():
+    register_frame.place_forget()
+    login_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
+    clear_entry_boxes()
+
+def generate_username():
+    firstname = register_first_name_entry.get()
+    lastname = register_last_name_entry.get()
+
+    if len(lastname) >= 5:
+        user_id = lastname[:5] + '1' + firstname[0]
+    else:
+        user_id = lastname + (firstname[:5 - len(lastname)] if len(firstname) >= 5 - len(lastname) else firstname) + '1' + firstname[0]
+    
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    existing_user = cursor.fetchone()
+    while existing_user:
+        i = int(user_id[-2]) + 1
+        user_id = user_id[:-2] + str(i) + firstname[0]
+        cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+        existing_user = cursor.fetchone()
+
+    return user_id
+
+def switch_to_register_page():
+    login_frame.place_forget()
+    register_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
+    clear_entry_boxes()
+
+def toggle_class_field(*args):
+    role = register_role_var.get()
+
+    if role == "Student":
+        register_class_label.place(relx=0.4, rely=0.525)
+        register_class_dropdown.place(relx=0.5, rely=0.525)
+        register_email_label.place(relx=0.4, rely=0.6)
+        register_email_entry.place(relx=0.5, rely=0.6)
+        register_password_label.place(relx=0.4, rely=0.675)
+        register_password_entry.place(relx=0.5, rely=0.675)
+        register_button.place(relx=0.45, rely=0.75)
+        back_button.place(relx=0.5, rely=0.75)
+    else:
+        register_email_label.place(relx=0.4, rely=0.525)
+        register_email_entry.place(relx=0.5, rely=0.525)
+        register_password_label.place(relx=0.4, rely=0.6)
+        register_password_entry.place(relx=0.5, rely=0.6)
+        back_button.place(relx=0.5, rely=0.675)
+        register_button.place(relx=0.45, rely=0.675)
+        register_class_label.place_forget()
+        register_class_dropdown.place_forget()
+
+def login():
+    username = login_username_entry.get()
+    password = login_password_entry.get()
+    clear_entry_boxes()
+    cursor.execute('''
+        SELECT * FROM users WHERE user_id = ? AND password = ?
+    ''', (username, password))
+
+    user = cursor.fetchone()
+
+    if user:
+        messagebox.showinfo("Login", f"Logged in as {username}")
+        root.destroy()
+        cursor.execute("SELECT role FROM users WHERE user_id = ?",(username,))
+        result=cursor.fetchone()
+        role = result[0]
+        if role == 'Student':
+            subprocess.run(['python', 'student_dashboard.py', username], check=True)
+        elif role == 'Instructor':
+            subprocess.run(['python', 'instructor_dashboard.py', username], check=True)
+        else:
+            subprocess.run(['python', 'admin_dashboard.py', username], check=True)
+    else:
+        messagebox.showerror("Error", "Invalid username or password")
+
+def register():
+    first_name = register_first_name_entry.get().title()
+    last_name = register_last_name_entry.get().title()
+    role = register_role_var.get()
+    class_selected = register_class_var.get() if role == "Student" else None
+    password = register_password_entry.get()
+    email = register_email_entry.get()  # Get email from the entry widget
+    if any((entry_value is None or entry_value == '') for entry_value in [first_name, last_name, role, password, email]):
+        messagebox.showerror("Error", "Please fill in all the required fields.")
+        return
+    # Define the regex patterns for password validation
+    regex_length = r".{6,}"
+    regex_symbol = r"[!@#$%^&*(),.?\":{}|<>]"
+    regex_uppercase = r"[A-Z]"
+
+    # Check if password meets all the requirements
+    error_messages = []
+    if not re.search(regex_length, password):
+        error_messages.append("Password must be at least 6 characters long.")
+    if not re.search(regex_symbol, password):
+        error_messages.append("Password must contain at least one symbol.")
+    if not re.search(regex_uppercase, password):
+        error_messages.append("Password must have at least one uppercase character.")
+
+    if error_messages:
+        messagebox.showerror("Error", "\n".join(error_messages))
+        return
+    
+    username = generate_username()
+    clear_entry_boxes()
+
+    cursor.execute('''
+        INSERT INTO users (first_name, last_name, role, class, user_id, password, email)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (first_name, last_name, role, class_selected, username, password, email))  # Include email in the insert query
+    conn.commit()
+
+    # Send email to the user with the generated username
+    send_email(email, username,first_name,last_name)
+
+    messagebox.showinfo("Registration", "Registration successful!")
+    messagebox.showinfo("Generated Username", f"Generated username: {username}")
+    switch_to_login_page()
+
+def send_email(receiver_email, username,first_name,last_name):
+    try:
+        sender_email = ""  # Your email address
+        smtp_server = "smtp.gmail.com"  # Your SMTP server address
+        smtp_port = 587  # Your SMTP port
+        smtp_username = sender_email  # Your SMTP username
+        smtp_password = ""  # Your SMTP password
+
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        msg['Subject'] = "Registration Successful"
+        
+        body = f"Dear {first_name} {last_name},\n\nYour registration was successful. Your username is: {username}\n\nBest Regards,\nCMU High School"
+        msg.attach(MIMEText(body, 'plain'))
+
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        server.sendmail(sender_email, receiver_email, msg.as_string())
+        server.quit()
+    except Exception as e:
+        print("Failed to send email:", e)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.title("Login and Register Pages")
+    root.state('zoomed')
+    root.geometry("900x600")
+    root.configure(bg="#00415a")
+    image_path = "E:/cmu/BIS 698/misc code/cmu high scl.png"
+    img = tk.PhotoImage(file=image_path)
+    image2_path =  "E:/cmu/BIS 698/misc code/OIG2.png"
+    img2 = tk.PhotoImage(file=image2_path)
+
+    # login frame
+    login_frame = tk.Frame(root, bg="#00415a")
+    login_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
+    image_label = tk.Label(login_frame, image=img)
+    image_label.place(relx=0.5, rely=0.0, anchor=tk.N)
+    login_username_label = tk.Label(login_frame, text="Username:", bg="#00415a", fg="white")
+    login_username_label.place(relx=0.4, rely=0.35)
+
+    login_username_entry = tk.Entry(login_frame)
+    login_username_entry.place(relx=0.5, rely=0.35)
+
+    login_password_label = tk.Label(login_frame, text="Password:", bg="#00415a", fg="white")
+    login_password_label.place(relx=0.4, rely=0.4)
+
+    login_password_entry = tk.Entry(login_frame, show="*")
+    login_password_entry.place(relx=0.5, rely=0.4)
+
+    login_button = tk.Button(login_frame, text="Login", command=login, bg='#87CEEB')
+    login_button.place(relx=0.45, rely=0.45)
+
+    register_button = tk.Button(login_frame, text="Register", command=switch_to_register_page, bg='#87CEEB')
+    register_button.place(relx=0.51, rely=0.45)
+
+    # register frame
+    register_frame = tk.Frame(root, bg="#00415a")
+    register_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
+    image_label = tk.Label(register_frame, image=img)
+    image_label.place(relx=0.5, rely=0.0, anchor=tk.N)
+
+    register_first_name_label = ttk.Label(register_frame, text="First Name:", background="#00415a", foreground="white")
+    register_first_name_label.place(relx=0.4, rely=0.3)
+
+    register_first_name_entry = ttk.Entry(register_frame)
+    register_first_name_entry.place(relx=0.5, rely=0.3)
+
+    register_last_name_label = ttk.Label(register_frame, text="Last Name:", background="#00415a", foreground="white")
+    register_last_name_label.place(relx=0.4, rely=0.375)
+
+    register_last_name_entry = ttk.Entry(register_frame)
+    register_last_name_entry.place(relx=0.5, rely=0.375)
+
+    register_role_label = ttk.Label(register_frame, text="Role:", background="#00415a", foreground="white")
+    register_role_label.place(relx=0.4, rely=0.45)
+
+    roles = ["Instructor", "Student", "Admin"]
+    register_role_var = tk.StringVar(register_frame)
+    register_role_var.set(roles[0])
+
+    register_role_var.trace_add("write", toggle_class_field)
+
+    register_role_dropdown = ttk.Combobox(register_frame, textvariable=register_role_var, values=roles)
+    register_role_dropdown.place(relx=0.5, rely=0.45)
+
+    register_class_var = tk.StringVar(register_frame)
+    register_class_label = ttk.Label(register_frame, text="Class:", background="#00415a", foreground="white")
+    register_class_var.set(9)
+    register_class_dropdown = ttk.Combobox(register_frame, textvariable=register_class_var, values=[9,10,11,12])
+
+    register_email_label = ttk.Label(register_frame, text="Email:", background="#00415a", foreground="white")
+    register_email_label.place(relx=0.4, rely=0.525)
+
+    register_email_entry = ttk.Entry(register_frame)  # Add email entry field
+    register_email_entry.place(relx=0.5, rely=0.525)
+
+    register_password_label = ttk.Label(register_frame, text="Password:", background="#00415a", foreground="white")
+    register_password_label.place(relx=0.4, rely=0.6)
+
+    register_password_entry = ttk.Entry(register_frame, show="*")
+    register_password_entry.place(relx=0.5, rely=0.6)
+
+    register_button = tk.Button(register_frame, text="Register", command=register,bg='#87CEEB')
+    register_button.place(relx=0.45, rely=0.675)
+    
+    back_button = tk.Button(register_frame, text="Back", command=switch_to_login_page,bg='#87CEEB')
+    back_button.place(relx=0.5, rely=0.675)
+    
+    switch_to_login_page()
+
+    root.mainloop()
+
+# Close the database connection 
+conn.close()
+
+**********************************************************************************************************************************************************************************
+User details code for dashboards(database.py)
+**********************************************************************************************************************************************************************************
+import sqlite3
+
+class User:
+    def __init__(self, db_file='user.db'):
+        self.conn = sqlite3.connect(db_file)
+        
+
+    def get_details(self, detail, username):
+        with self.conn:
+            cursor = self.conn.cursor()
+            cursor.execute(f'''
+                SELECT {detail} FROM users
+                WHERE user_id = ?
+            ''', (username,))
+            result = cursor.fetchone()
+            return result[0] if result else None
+
+    def close(self):
+        self.conn.close()
+
+# Example usage:
+if __name__ == "__main__":
+    user=User()
+    x=user.get_details('first_name','mechi1c')
+    print(x)
+  
+
+
+**********************************************************************************************************************************************************************************
+Admin Home Page(admin_dashboard.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+import subprocess
+import sys
+from database import User
+from tkinter import font
+
+class AdminDashboard(tk.Tk):
+    def __init__(self, username):
+        super().__init__()
+        self.title("Admin Dashboard")
+        self.state('zoomed')
+        self.geometry("900x600")
+        self.configure(bg="#00415a")
+        self.user = User()
+        self.username = username
+        self.firstname = self.user.get_details('first_name', username)
+        self.lastname = self.user.get_details('last_name', username)
+        self.image_path = "E:/cmu/BIS 698/misc code/cmu high scl.png"
+        self.image = tk.PhotoImage(file=self.image_path)
+        self.create_widgets()
+
+    def create_widgets(self):
+
+        fg="white"
+        bg="#00415a"
+        custom_font = font.Font(family="Arial", size=24, weight="bold")
+        # Create a label to display the image
+        self.image_label = tk.Label(self, image=self.image)
+        self.image_label.place(relx=0.5, rely=0.0, anchor=tk.N)
+        self.firstname_label = tk.Label(self, text=('Welcome'+' '+self.firstname +' '+ self.lastname), 
+                                        foreground=fg,
+                                        background=bg,
+                                        font=custom_font)
+        self.firstname_label.place(relx=0.05, rely=0.4, anchor=tk.W)
+
+        # Buttons
+        course_button = tk.Button(self, text="Courses", command=self.open_courses, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        course_button.place(relx=0.6, rely=0.6, anchor=tk.W)
+
+        sections_button = tk.Button(self, text="Sections", command=self.open_sections, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        sections_button.place(relx=0.6, rely=0.7, anchor=tk.W)
+        # Logout Button
+        logout_button = tk.Button(self, text="Logout", command=self.logout, bg='#87CEEB', font=('Arial', 10, 'bold'))
+        logout_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+    def open_courses(self):
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\admin_course.py', self.username], check=True)
+
+    def open_sections(self):    
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\admin_section.py', self.username], check=True)
+
+    def logout(self):
+        self.destroy()  # Close the current window
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\login_register.py'])
+
+# Retrieve the username from command-line arguments
+if len(sys.argv) >= 2:
+    username = sys.argv[1]
+    print(f"Username received in admin_dashboard.py: {username}")
+else:
+    username = 'mechi1c'
+
+# Create an instance of the AdminDashboard class
+app = AdminDashboard(username)
+
+# Run the Tkinter main loop
+app.mainloop()
+
+**********************************************************************************************************************************************************************************
+Student Home Page(student_dashboard.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import font
+import sys
+from database import User
+import subprocess
+
+class StudentDashboard(tk.Tk):
+    def __init__(self, username):
+        super().__init__()
+        self.title("Student Dashboard")
+        self.state('zoomed')
+        self.geometry("900x600")
+        self.configure(bg="#00415a")  
+
+        self.user = User()
+        self.username = username
+        self.firstname = self.user.get_details('first_name', username)
+        self.lastname = self.user.get_details('last_name', username)
+        self.role = self.user.get_details('role', username)
+        self.cls = self.user.get_details('class', username)
+
+        # Load an image (replace 'your_image_path.jpg' with the actual path to your image)
+        # self.image_path = "E:/cmu/BIS 698/misc code/OIG2.png"
+        # self.image = tk.PhotoImage(file=self.image_path)
+        self.image_path = "E:/cmu/BIS 698/misc code/cmu high scl.png"
+        self.image = tk.PhotoImage(file=self.image_path)
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        fg="white"
+        bg="#00415a"
+        custom_font = font.Font(family="Arial", size=24, weight="bold")
+        # Create a label to display the image
+        self.image_label = tk.Label(self, image=self.image)
+        self.image_label.place(relx=0.5, rely=0.0, anchor=tk.N)
+        # self.welcome_label = tk.Label(self, text="Welcome ", 
+        #                               foreground=fg,
+        #                               background=bg,
+        #                               font=custom_font)
+        # self.welcome_label.place(relx=0.05, rely=0.4, anchor=tk.W)
+        self.firstname_label = tk.Label(self, text=('Welcome'+' '+self.firstname +' '+ self.lastname), 
+                                        foreground=fg,
+                                        background=bg,
+                                        font=custom_font)
+        self.firstname_label.place(relx=0.05, rely=0.4, anchor=tk.W)
+
+        
+        # Labels and entry widgets for student details
+        # self.firstname_label = tk.Label(self, text="First Name: ", foreground=fg, background=bg)
+        # self.firstname_label.place(relx=0.2, rely=0.6, anchor=tk.W)
+        # self.firstname_value_label = tk.Label(self, text=self.firstname, foreground=fg, background=bg)
+        # self.firstname_value_label.place(relx=0.4, rely=0.6, anchor=tk.W)
+
+        # self.lastname_label = tk.Label(self, text="Last Name: ", foreground=fg, background=bg)
+        # self.lastname_label.place(relx=0.2, rely=0.65, anchor=tk.W)
+        # self.lastname_value_label = tk.Label(self, text=self.lastname, foreground=fg, background=bg)
+        # self.lastname_value_label.place(relx=0.4, rely=0.65, anchor=tk.W)
+
+        # self.class_label = tk.Label(self, text="Class: ", foreground=fg, background=bg)
+        # self.class_label.place(relx=0.2, rely=0.7, anchor=tk.W)
+        # self.class_value_label = tk.Label(self, text=self.cls, foreground=fg, background=bg)
+        # self.class_value_label.place(relx=0.4, rely=0.7, anchor=tk.W)
+
+        # self.username_label = tk.Label(self, text="Username: ", foreground=fg, background=bg)
+        # self.username_label.place(relx=0.2, rely=0.75, anchor=tk.W)
+        # self.username_value_label = tk.Label(self, text=self.username, foreground=fg, background=bg)
+        # self.username_value_label.place(relx=0.4, rely=0.75, anchor=tk.W)
+
+        # Buttons
+        self.course_reg_button = tk.Button(self, text="Course Registration", command=self.course_reg_button_click, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        self.course_reg_button.place(relx=0.7, rely=0.4, anchor=tk.W)
+        self.attendance_button = tk.Button(self, text="Attendance", command=self.attendance_button_click, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        self.attendance_button.place(relx=0.7, rely=0.5, anchor=tk.W)
+        self.grades_button = tk.Button(self, text="Grades", command=self.grades_button_click, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        self.grades_button.place(relx=0.7, rely=0.6, anchor=tk.W)
+        self.logout_button = tk.Button(self, text="Logout", command=self.logout_button_click, bg='#87CEEB', font=('Arial', 10, 'bold'))
+        self.logout_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+    def course_reg_button_click(self):
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\course_view_student.py', self.username], check=True)
+        print("Button 1 clicked")
+
+    def attendance_button_click(self):
+        # Add functionality for button 2
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\check_attend_try.py', self.username], check=True)
+        print("Button 2 clicked")
+
+    def grades_button_click(self):
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\student_grade.py', self.username], check=True)
+        print("Button 3 clicked")
+
+    def notifications_button_click(self):
+        # Add functionality for button 4
+        print("Button 4 clicked")
+    
+    def logout_button_click(self):
+        #add functionality for button 4
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\login_register.py', self.username], check=True)
+        print("Logout button clicked")
+
+
+# Retrieve the username from command-line arguments
+if len(sys.argv) >= 2:
+    username = sys.argv[1]
+    print(f"Username received in student_dashboard.py: {username}")
+else:
+    username = 'clark1b'
+
+# Create an instance of the StudentDashboard class
+app = StudentDashboard(username)
+
+# Run the Tkinter main loop
+app.mainloop()
+
+**********************************************************************************************************************************************************************************
+Instructor Home Page(instructor_dashboard.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import ttk
+import sys
+from database import User
+import subprocess
+from tkinter import font
+
+class StudentDashboard(tk.Tk):
+    def __init__(self, username):
+        super().__init__()
+        self.title("Student Dashboard")
+        self.state('zoomed')
+        self.geometry("900x600")
+        self.configure(bg="#00415a") 
+
+        self.user = User()
+        self.username = username
+        self.firstname = self.user.get_details('first_name', username)
+        self.lastname = self.user.get_details('last_name', username)
+        self.role = self.user.get_details('role', username)
+        self.cls = self.user.get_details('class', username)
+
+        # Load an image (replace 'your_image_path.jpg' with the actual path to your image)
+        # self.image_path = "E:/cmu/BIS 698/misc code/OIG2.png"
+        # self.image = tk.PhotoImage(file=self.image_path)
+        self.image_path = "E:/cmu/BIS 698/misc code/cmu high scl.png"
+        self.image = tk.PhotoImage(file=self.image_path)
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        fg="white"
+        bg="#00415a"
+        custom_font = font.Font(family="Arial", size=24, weight="bold")
+        # Create a label to display the image
+        self.image_label = tk.Label(self, image=self.image)
+        self.image_label.place(relx=0.5, rely=0.0, anchor=tk.N)
+        # self.welcome_label = tk.Label(self, text="Welcome ", 
+        #                               foreground=fg,
+        #                               background=bg,
+        #                               font=custom_font)
+        # self.welcome_label.place(relx=0.05, rely=0.4, anchor=tk.W)
+        self.firstname_label = tk.Label(self, text=('Welcome'+' '+self.firstname +' '+ self.lastname), 
+                                        foreground=fg,
+                                        background=bg,
+                                        font=custom_font)
+        self.firstname_label.place(relx=0.05, rely=0.4, anchor=tk.W)
+
+        
+        # # Labels and entry widgets for student details
+        # self.firstname_label = tk.Label(self, text="First Name: ", foreground=fg, background=bg)
+        # self.firstname_label.place(relx=0.2, rely=0.6, anchor=tk.W)
+        # self.firstname_value_label = tk.Label(self, text=self.firstname, foreground=fg, background=bg)
+        # self.firstname_value_label.place(relx=0.4, rely=0.6, anchor=tk.W)
+
+        # self.lastname_label = tk.Label(self, text="Last Name: ", foreground=fg, background=bg)
+        # self.lastname_label.place(relx=0.2, rely=0.65, anchor=tk.W)
+        # self.lastname_value_label = tk.Label(self, text=self.lastname, foreground=fg, background=bg)
+        # self.lastname_value_label.place(relx=0.4, rely=0.65, anchor=tk.W)
+
+        # self.username_label = tk.Label(self, text="Username: ", foreground=fg, background=bg)
+        # self.username_label.place(relx=0.2, rely=0.7, anchor=tk.W)
+        # self.username_value_label = tk.Label(self, text=self.username, foreground=fg, background=bg)
+        # self.username_value_label.place(relx=0.4, rely=0.7, anchor=tk.W)
+
+        # Buttons
+        self.course_reg_button = tk.Button(self, text="Course Registration", command=self.course_reg_button_click, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        self.course_reg_button.place(relx=0.7, rely=0.4, anchor=tk.W)
+        self.attendance_button = tk.Button(self, text="Attendance", command=self.attendence_button_click, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        self.attendance_button.place(relx=0.7, rely=0.5, anchor=tk.W)
+        self.grades_button = tk.Button(self, text="Grades", command=self.grades_button_click, padx=20, pady=10, width=20, bg='#87CEEB', font=('Arial', 14, 'bold'))
+        self.grades_button.place(relx=0.7, rely=0.6, anchor=tk.W)
+        self.logout_button = tk.Button(self, text="Logout", command=self.logout_button_click, bg='#87CEEB', font=('Arial', 10, 'bold'))
+        self.logout_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+    def course_reg_button_click(self):
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\course_reg_instructor.py', username], check=True)
+        print("Button 1 clicked")
+
+    def attendence_button_click(self):
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\attendence_try.py', username], check=True)
+        print("Button 2 clicked")
+
+    def grades_button_click(self):
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\instructor_grade.py', username], check=True)
+        print("Button 3 clicked")
+    
+    def logout_button_click(self):
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\login_register.py', username], check=True)
+        print("Logout button clicked")
+
+
+# Retrieving the username from command-line arguments
+if len(sys.argv) >= 2:
+    username = sys.argv[1]
+    print(f"Username received in student_dashboard.py: {username}")
+else:
+    username = 'kumar1v'
+app = StudentDashboard(username)
+app.mainloop()
+
+**********************************************************************************************************************************************************************************
+Admin Course Page(admin_course.py)
+**********************************************************************************************************************************************************************************
+
+import tkinter as tk
+from tkinter import messagebox
+from tkinter import ttk
+import sys
+import sqlite3
+import subprocess
+
+class AddCourseWindow:
+    def __init__(self, parent, refresh_callback):
+        self.parent = parent
+        self.refresh_callback = refresh_callback
+        self.window = tk.Toplevel(parent)
+        self.window.title("Add Course")
+        self.window.geometry("300x200")
+        self.window.configure(bg="#00415a")  # Set background color
+
+        self.course_name_label = tk.Label(self.window, text="Course Name:", bg="#00415a",fg="white")
+        self.course_name_label.place(relx=0.1, rely=0.1)
+        self.course_name_entry = tk.Entry(self.window)
+        self.course_name_entry.place(relx=0.5, rely=0.1)
+
+        self.class_label = tk.Label(self.window, text="Class:", bg="#00415a",fg="white")
+        self.class_label.place(relx=0.1, rely=0.3)
+        self.class_var = tk.StringVar()
+        self.class_combobox = ttk.Combobox(self.window, textvariable=self.class_var, values=["9", "10", "11", "12"])
+        self.class_combobox.place(relx=0.5, rely=0.3)
+
+        self.credits_label = tk.Label(self.window, text="Credits:", bg="#00415a",fg="white")
+        self.credits_label.place(relx=0.1, rely=0.5)
+        self.credits_var = tk.StringVar()
+        self.credits_combobox = ttk.Combobox(self.window, textvariable=self.credits_var, values=["1", "2", "3", "4"])
+        self.credits_combobox.place(relx=0.5, rely=0.5)
+
+        self.submit_button = tk.Button(self.window, text="Submit", command=self.submit_course, bg='#87CEEB')
+        self.submit_button.place(relx=0.5, rely=0.7)
+
+    def submit_course(self):
+        course_name = self.course_name_entry.get().title()
+        class_ = self.class_var.get().title()
+        credits = self.credits_combobox.get().title()
+
+        if not course_name or not class_ or not credits:
+            messagebox.showerror("Error", "Please fill in all fields.")
+            return
+
+        try:
+            # Connect to SQLite3 database
+            conn = sqlite3.connect('user.db')  
+            c = conn.cursor()
+
+            # Get the maximum course ID
+            max_course_id = c.execute("SELECT MAX(course_id) FROM course").fetchone()[0]
+            
+            # Increment the course ID
+            if max_course_id is None:
+                new_course_id = 'C1000'  # Start with 'c1000' if there are no existing course IDs
+            else:
+                last_id = int(max_course_id[1:])  # Extract the numeric part of the last course ID
+                new_course_id = 'C' + str(last_id + 1).zfill(4)  # Increment and format the new course ID
+        
+            # Insert the new course into the database
+            c.execute("INSERT INTO course (course_id, course_name, class, credits) VALUES (?, ?, ?, ?)", (new_course_id, course_name, class_, credits))
+            conn.commit()
+
+            messagebox.showinfo("Success", "Course added successfully.")
+            self.refresh_callback()
+            self.window.destroy()
+        except sqlite3.Error as e:
+            messagebox.showerror("Error", f"Error adding course: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+class AdminCourseApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Admin Course Management")
+        self.root.geometry("900x600")
+        self.root.configure(bg="#00415a")  # Set background color
+        
+        # Connect to SQLite3 database
+        self.conn = sqlite3.connect('user.db')
+        self.c = self.conn.cursor()
+
+        self.create_widgets()
+        self.load_courses()
+
+    def create_widgets(self):
+        # Set the desired width and height for the Treeview
+        self.style = ttk.Style()
+        self.style.theme_use("clam")
+        self.style.configure("Treeview", background="#00415a", fieldbackground="#00415a", font=("Arial", 12))
+        # Configure style for Treeview headings
+        self.style.configure("Treeview.Heading",
+                             background="#00415a",  # Heading background color
+                             foreground="white",  # Heading font color
+                             font=("Helvetica", 12, "bold"))  # Heading font
+
+        self.course_table = ttk.Treeview(self.root, columns=("Course ID", "Name", "Class", "Credits"), show="headings")
+        self.course_table.heading("Course ID", text="Course ID")
+        self.course_table.heading("Name", text="Name")
+        self.course_table.heading("Class", text="Class")
+        self.course_table.heading("Credits", text="Credits")
+        self.course_table.place(relx=0.01, rely=0.01, relwidth=0.98, relheight=0.85)
+
+        # Set column widths
+        self.course_table.column("Course ID", width=150)
+        self.course_table.column("Name", width=320)
+        self.course_table.column("Class", width=200)
+        self.course_table.column("Credits", width=200)
+
+
+        self.add_button = tk.Button(self.root, text="Add Course", command=self.open_add_course_window, bg='#87CEEB')
+        self.add_button.place(relx=0.01, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.delete_button = tk.Button(self.root, text="Delete Course(s)", command=self.delete_selected_courses, bg='#87CEEB')
+        self.delete_button.place(relx=0.12, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.logout_button = tk.Button(self.root, text="Logout", command=self.logout, bg='#87CEEB')
+        self.logout_button.place(relx=0.78, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.back_button = tk.Button(self.root, text="Back", command=self.back, bg='#87CEEB')
+        self.back_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+        
+    def load_courses(self):
+        # Clear previous course entries
+        self.course_table.delete(*self.course_table.get_children())
+        tag = "even"
+        # Fetch courses from the database
+        courses = self.c.execute("SELECT * FROM course").fetchall()
+        
+        for course in courses:
+            self.course_table.insert("", "end", values=course, tags=(tag,))
+            tag = "odd" if tag == "even" else "even"
+        self.course_table.tag_configure("even", background="#f2f2f2")
+        self.course_table.tag_configure("odd", background="#ffffff")
+
+    def delete_selected_courses(self):
+        selected_items = self.course_table.selection()
+        if not selected_items:
+            messagebox.showerror("Error", "Please select course(s) to delete.")
+            return
+
+        try:
+            # Connect to SQLite3 database
+            conn = sqlite3.connect('user.db')
+            c = conn.cursor()
+
+            for item in selected_items:
+                # Get the course ID of the selected item
+                course_id = self.course_table.item(item, "values")[0]
+                # Delete the course from the database
+                c.execute("DELETE FROM course WHERE course_id=?", (course_id,))
+            
+            conn.commit()
+
+            messagebox.showinfo("Success", "Selected course(s) deleted successfully.")
+            self.load_courses()
+        except sqlite3.Error as e:
+            messagebox.showerror("Error", f"Error deleting course(s): {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    def open_add_course_window(self):
+        AddCourseWindow(self.root, self.load_courses)
+        
+    def logout(self):
+        self.root.destroy()  # Close the current window
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\login_register.py'])
+
+    def back(self):
+        self.root.destroy()  # Close the current window
+        subprocess.run(['python', 'E:\\cmu\\BIS 698\\misc code\\admin_dashboard.py', username], check=True)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.state('zoomed')
+    if len(sys.argv) >= 2:
+        username = sys.argv[1]
+        print(f"Username received in admin_dashboard.py: {username}")
+    else:
+        username = 'mechi1c'
+    app = AdminCourseApp(root)
+    root.mainloop()
+
+**********************************************************************************************************************************************************************************
+Admin Section Page(admin_section.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import messagebox, ttk
+import sqlite3
+import sys
+import subprocess
+
+class AddSectionWindow:
+    def __init__(self, parent, refresh_callback):
+        self.parent = parent
+        self.refresh_callback = refresh_callback
+        self.window = tk.Toplevel(parent)
+        self.window.title("Add Section")
+        self.window.geometry("300x300")
+        self.window.configure(bg="#00415a")
+
+        self.course_label = tk.Label(self.window, text="Select Course:", bg="#00415a",fg="white")
+        self.course_label.place(relx=0.05, rely=0.07)
+        self.course_var = tk.StringVar()
+        self.course_combobox = ttk.Combobox(self.window, textvariable=self.course_var, state="readonly")
+        self.course_combobox.place(relx=0.5, rely=0.07)
+
+        self.instructor_label = tk.Label(self.window, text="Select Instructor:", bg="#00415a",fg="white")
+        self.instructor_label.place(relx=0.05, rely=0.2)
+        self.instructor_var = tk.StringVar()
+        self.instructor_combobox = ttk.Combobox(self.window, textvariable=self.instructor_var, state="readonly")
+        self.instructor_combobox.place(relx=0.5, rely=0.2)
+
+        self.start_time_label = tk.Label(self.window, text="Start Time:", bg="#00415a",fg="white")
+        self.start_time_label.place(relx=0.05, rely=0.33)
+        self.start_time_var = tk.StringVar()
+        self.start_time_combobox = ttk.Combobox(self.window, textvariable=self.start_time_var, state="readonly")
+        self.start_time_combobox.place(relx=0.5, rely=0.33)
+
+        self.end_time_label = tk.Label(self.window, text="End Time:", bg="#00415a",fg="white")
+        self.end_time_label.place(relx=0.05, rely=0.47)
+        self.end_time_var = tk.StringVar()
+        self.end_time_combobox = ttk.Combobox(self.window, textvariable=self.end_time_var, state="readonly")
+        self.end_time_combobox.place(relx=0.5, rely=0.47)
+
+        self.day_label = tk.Label(self.window, text="Select Day:", bg="#00415a",fg="white")
+        self.day_label.place(relx=0.05, rely=0.6)
+        self.day_var = tk.StringVar()
+        self.day_combobox = ttk.Combobox(self.window, textvariable=self.day_var, state="readonly")
+        self.day_combobox.place(relx=0.5, rely=0.6)
+
+        self.room_label = tk.Label(self.window, text="Room Number:", bg="#00415a",fg="white")
+        self.room_label.place(relx=0.05, rely=0.73)
+        self.room_entry = tk.Entry(self.window)
+        self.room_entry.place(relx=0.5, rely=0.73)
+
+        self.submit_button = tk.Button(self.window, text="Submit", command=self.submit_section,bg='#87CEEB')
+        self.submit_button.place(relx=0.5, rely=0.87)
+
+        # Populate course, instructor, and day dropdowns
+        self.populate_course_dropdown()
+        self.populate_instructor_dropdown()
+        self.populate_day_dropdown()
+        self.populate_time_dropdowns()
+
+    def populate_course_dropdown(self):
+        try:
+            conn = sqlite3.connect('user.db')
+            c = conn.cursor()
+            courses = c.execute("SELECT course_name FROM course").fetchall()
+            self.course_combobox["values"] = [course[0] for course in courses]
+        except sqlite3.Error as e:
+            messagebox.showerror("Error", f"Error fetching courses: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    def populate_day_dropdown(self):
+        # Days of the week (Monday to Friday)
+        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        self.day_combobox["values"] = days
+
+    def populate_instructor_dropdown(self):
+        try:
+            conn = sqlite3.connect('user.db')
+            c = conn.cursor()
+            instructors = c.execute("SELECT first_name, last_name FROM users WHERE role=?", ("Instructor",)).fetchall()
+            self.instructor_combobox["values"] = [f"{instructor[0]} {instructor[1]}" for instructor in instructors]
+        except sqlite3.Error as e:
+            messagebox.showerror("Error", f"Error fetching instructors: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+    def populate_time_dropdowns(self):
+        # Generate time options
+        times = []
+        for hour in range(7, 23):  # Hours from 07:00 AM to 10:00 PM
+            for minute in range(0, 60, 30):  # Minutes with 30-minute interval
+                time = f"{hour:02d}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
+                times.append(time)
+
+        # Populate start time and end time dropdowns
+        self.start_time_combobox["values"] = times
+        self.end_time_combobox["values"] = times
+
+    def submit_section(self):
+        course_name = self.course_var.get()
+        instructor_name = self.instructor_var.get()
+        start_time = self.start_time_var.get()
+        end_time = self.end_time_var.get()
+        room_number = self.room_entry.get()
+        day = self.day_var.get()
+        start_time = start_time + ' ('+day+ ')'
+        end_time = end_time +' ('+ day+ ')'
+        
+        if not course_name or not instructor_name or not start_time or not end_time or not room_number:
+            messagebox.showerror("Error", "Please fill in all fields.")
+
+            return
+
+        if start_time >= end_time:
+            messagebox.showerror("Error", "time error.")
+            return    
+        try:
+            conn = sqlite3.connect('user.db')
+            c = conn.cursor()
+
+            # Get course ID
+            course_id = c.execute("SELECT course_id FROM course WHERE course_name=?", (course_name,)).fetchone()[0]
+            # Get the maximum section ID
+            max_section_id = c.execute("SELECT MAX(section_id) FROM section").fetchone()[0]
+
+            # Increment the section ID
+            if max_section_id is None:
+                new_section_id = 'S1000'  # Start with 's1000' if there are no existing section IDs
+            else:
+                last_id = int(max_section_id[1:])  # Extract the numeric part of the last section ID
+                new_section_id = 'S' + str(last_id + 1)  # Increment and format the new section ID
+            
+            # Get instructor ID
+            instructor_fullname = instructor_name.split()
+            instructor_id = c.execute("SELECT user_id FROM users WHERE first_name=? AND last_name=? AND role=?", (instructor_fullname[0], instructor_fullname[1], "Instructor")).fetchone()[0]
+
+            # Insert new section into the database
+            c.execute("INSERT INTO section (section_id,course_id, instructor_id, start_time, end_time, class_room) VALUES (?,?, ?, ?, ?, ?)",
+                      (new_section_id,course_id, instructor_id, start_time, end_time, room_number))
+            conn.commit()
+
+            messagebox.showinfo("Success", "Section added successfully.")
+            self.refresh_callback()
+            self.window.destroy()
+            
+        except sqlite3.Error as e:
+            messagebox.showerror("Error", f"Error adding section: {e}")
+        finally:
+            if conn:
+                conn.close()
+        
+                
+class SectionManagementApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Admin Section Management")
+        self.root.geometry("900x600")
+        self.root.configure(bg="#00415a") 
+        
+        # Connect to SQLite3 database
+        self.conn = sqlite3.connect('user.db')
+        self.c = self.conn.cursor()
+
+        self.create_widgets()
+        self.load_sections()
+
+    def create_widgets(self):
+        self.style = ttk.Style()
+        self.style.theme_use("clam")  # Use the "clam" theme
+
+        # Configure style for Treeview widget
+        self.style.configure("Treeview",
+                             background="#00415a",  # Background color
+                             foreground="black",  # Font colo
+                             fieldbackground="#00415a",
+                             font=("Helvetica", 12))  # Field background color
+
+        # Configure style for Treeview headings
+        self.style.configure("Treeview.Heading",
+                             background="#00415a",  # Heading background color
+                             foreground="white",  # Heading font color
+                             font=("Helvetica", 12, "bold"))  # Heading font
+
+        self.section_table = ttk.Treeview(self.root, columns=("Section ID", "Course ID", "Instructor", "Start Time", "End Time", "Class Room"), show="headings")
+        self.section_table.heading("Section ID", text="Section ID")
+        self.section_table.heading("Course ID", text="Course ID")
+        self.section_table.heading("Instructor", text="Instructor")
+        self.section_table.heading("Start Time", text="Start Time")
+        self.section_table.heading("End Time", text="End Time")
+        self.section_table.heading("Class Room", text="Class Room")
+        self.section_table.place(relx=0.01, rely=0.01, relwidth=0.98, relheight=0.85)
+
+        # Set column widths
+        self.section_table.column("Section ID", width=120)
+        self.section_table.column("Course ID", width=120)
+        self.section_table.column("Instructor", width=200)
+        self.section_table.column("Start Time", width=200)
+        self.section_table.column("End Time", width=200)
+        self.section_table.column("Class Room", width=120)
+
+        self.add_button = tk.Button(self.root, text="Add Section", command=self.open_add_section_window,bg='#87CEEB')
+        self.add_button.place(relx=0.01, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.delete_button = tk.Button(self.root, text="Delete Section(s)", command=self.delete_selected_sections,bg='#87CEEB')
+        self.delete_button.place(relx=0.12, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.logout_button = tk.Button(self.root, text="Logout", command=self.logout,bg='#87CEEB')
+        self.logout_button.place(relx=0.78, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.back_button = tk.Button(self.root, text="Back", command=self.back,bg='#87CEEB')
+        self.back_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+    def load_sections(self):
+        # Clear previous section entries
+        self.section_table.delete(*self.section_table.get_children())
+        tag = "even"
+        # Fetch sections from the database
+        sections = self.c.execute("SELECT section_id, course_id, users.first_name || ' ' || users.last_name, start_time, end_time, class_room FROM section JOIN users ON section.instructor_id = users.user_id ORDER BY section.section_id").fetchall()
+        for section in sections:
+            self.section_table.insert("", "end", values=section, tags=(tag,))
+            tag = "odd" if tag == "even" else "even"
+        self.section_table.tag_configure("even", background="#f2f2f2")
+        self.section_table.tag_configure("odd", background="#ffffff")
+
+    def open_add_section_window(self):
+        AddSectionWindow(self.root, self.load_sections)
+
+    def delete_selected_sections(self):
+        selected_items = self.section_table.selection()
+        if not selected_items:
+            messagebox.showerror("Error", "Please select section(s) to delete.")
+            return
+
+        for selected_item in selected_items:
+            # Get the section ID of the selected item
+            section_id = self.section_table.item(selected_item, "values")[0]
+
+            try:
+                # Delete the section from the database
+                self.c.execute("DELETE FROM section WHERE section_id=?", (section_id,))
+                self.conn.commit()
+            except sqlite3.Error as e:
+                messagebox.showerror("Error", f"Error deleting section {section_id}: {e}")
+
+        # Refresh the section list
+        self.load_sections()
+        messagebox.showinfo("Success", "Selected section(s) deleted successfully.")
+        
+    def logout(self):
+        self.root.destroy()  # Close the current window
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\login_register.py', username], check=True)
+
+    def back(self):
+        self.root.destroy()  # Close the current window
+        subprocess.run(['python', 'E:\\cmu\\BIS 698\\misc code\\admin_dashboard.py', username], check=True)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.state('zoomed')
+    if len(sys.argv) >= 2:
+        username = sys.argv[1]
+        print(f"Username received in admin_dashboard.py: {username}")
+    else:
+        username = 'mechi1c'
+    app = SectionManagementApp(root)
+    root.mainloop()
+
+**********************************************************************************************************************************************************************************
+Instructor Attendance Page(attendance_try.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+from datetime import datetime
+from tkcalendar import Calendar
+import sys
+import subprocess
+
+class AttendanceApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Attendance Management System")
+        self.root.geometry("800x600")
+        self.root.configure(bg="#00415a")
+        # Connect to SQLite database
+        self.conn = sqlite3.connect('user.db')
+
+        # Get instructor ID
+        self.instructor_id = instructor_id
+
+        # Section Label
+        section_label = tk.Label(root, text="Section:", foreground="white", background="#00415a")
+        section_label.place(relx=0.01, rely=0.02)
+
+        # Section Dropdown
+        self.section_var = tk.StringVar()
+        self.section_dropdown = ttk.Combobox(root, textvariable=self.section_var)
+        self.section_dropdown.place(relx=0.08, rely=0.02)
+        self.populate_sections_dropdown()  # Populate sections dropdown
+        self.section_dropdown.bind("<<ComboboxSelected>>", self.display_students)  # Bind event
+
+        # Date Label
+        date_label = tk.Label(root, text="Date:", foreground="white", background="#00415a")
+        date_label.place(relx=0.32, rely=0.02)
+
+        # Date Entry
+        self.date_entry = tk.Entry(root)
+        self.date_entry.insert(0, datetime.now().strftime('%m-%d-%Y'))
+        self.date_entry.place(relx=0.36, rely=0.02)
+
+        # Calendar Popup Button
+        cal_popup_btn = tk.Button(root, text="Select Date", command=self.show_calendar_popup, bg='#87CEEB')
+        cal_popup_btn.place(relx=0.55, rely=0.017,relwidth=0.1, relheight=0.05)
+
+        # Attendance Listbox with Checkboxes
+        self.attendance_frame = tk.Frame(root, padx=20, pady=20, bg="#00415a")
+        self.attendance_frame.place(relx=0.3, rely=0.08, relwidth=0.5, relheight=0.80)
+
+        # Add scrollbar
+        self.scrollbar = ttk.Scrollbar(root, orient="vertical")
+        self.scrollbar.place(relx=0.98, rely=0.1, relheight=0.75)
+
+        self.canvas = tk.Canvas(self.attendance_frame, bg="#00415a", bd=0, highlightthickness=0, yscrollcommand=self.scrollbar.set)
+        self.canvas.place(relx=0.01, rely=0.01, relwidth=0.95, relheight=0.98)
+        self.scrollbar.config(command=self.canvas.yview)
+
+        self.inner_frame = tk.Frame(self.canvas, bg="#00415a")
+        self.canvas.create_window((0, 0), window=self.inner_frame, anchor="nw")
+
+        # Bind mouse wheel event to canvas
+        self.canvas.bind_all("<MouseWheel>", self.on_mousewheel)
+
+        # Submit Attendance Button
+        submit_btn = tk.Button(root, text="Submit Attendance", command=self.submit_attendance, bg='#87CEEB')
+        submit_btn.place(relx=0.02, rely=0.9, relwidth=0.15, relheight=0.05)
+
+        logout_btn = tk.Button(root, text="Logout", command=self.logout, bg='#87CEEB')
+        logout_btn.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        back_btn = tk.Button(root, text="Back", command=self.back, bg='#87CEEB')
+        back_btn.place(relx=0.78, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        # Automatically display students initially
+        self.display_students()
+
+    def show_calendar_popup(self):
+        self.calendar_popup = tk.Toplevel(self.root)
+        self.calendar_popup.title("Select Date")
+
+        self.cal = Calendar(self.calendar_popup, selectmode="day", date_pattern="mm-dd-yyyy")
+        self.cal.pack(padx=10, pady=10)
+
+        select_btn = tk.Button(self.calendar_popup, text="Select", command=self.set_selected_date)
+        select_btn.pack(pady=5)
+
+    def set_selected_date(self):
+        selected_date = self.cal.get_date()
+        self.date_entry.delete(0, tk.END)
+        self.date_entry.insert(0, selected_date)
+        self.calendar_popup.destroy()
+
+    def populate_sections_dropdown(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT section_id FROM section WHERE instructor_id = ?", (self.instructor_id,))
+        sections = cursor.fetchall()
+        self.section_dropdown['values'] = [section[0] for section in sections]
+
+    def display_students(self, event=None):
+        section_id = self.section_var.get()
+        cursor = self.conn.cursor()
+
+        # Fetch students for the selected section
+        students = []
+        if section_id:
+            cursor.execute("SELECT users.user_id, users.first_name, users.last_name FROM course_reg INNER JOIN users ON course_reg.student_id = users.user_id WHERE course_reg.section_id = ? AND course_reg.status = ?", (section_id,'y',))
+            students.extend(cursor.fetchall())
+
+            # Clear previous entries
+            for widget in self.inner_frame.winfo_children():
+                widget.destroy()
+
+            # Display students
+            for student in students:
+                # Create a frame for each student with a label and a dropdown
+                student_frame = tk.Frame(self.inner_frame, bg="#00415a")
+                student_frame.pack(fill=tk.X, pady=5)
+
+                student_id = student[0]
+                student_label = tk.Label(student_frame, text=f"{student[1]} {student[2]}", width=20, anchor='w', foreground="white", background="#00415a",font=('Arial', 10, 'bold'))
+                student_label.pack(side=tk.LEFT, padx=(10, 0))
+
+                status_var = tk.StringVar()
+                status_dropdown = ttk.Combobox(student_frame, values=['Present', 'Absent'], textvariable=status_var)
+                status_dropdown.pack(side=tk.LEFT, padx=(10, 0))
+
+                # Store student ID as a hidden label
+                hidden_label = tk.Label(student_frame, text=student_id, width=5, anchor='w', fg="#00415a", bg=root.cget('bg'))
+                hidden_label.pack(side=tk.LEFT)
+
+            self.canvas.update_idletasks()
+            self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
+    def submit_attendance(self):
+        section = self.section_var.get()
+        date = self.date_entry.get()
+
+        if section and date:
+            cursor = self.conn.cursor()
+
+            for student_frame in self.inner_frame.winfo_children():
+                student_id = student_frame.winfo_children()[2].cget("text")
+                student_status = student_frame.winfo_children()[1].get()
+
+                if student_status:  # Only insert if status is selected
+                    # Get the maximum attendance ID
+                    cursor.execute("SELECT MAX(attendance_id) FROM attendance")
+                    max_attendance_id = cursor.fetchone()[0]
+
+                    # Increment the attendance ID
+                    if max_attendance_id is None:
+                        new_attendance_id = 'A10000'  # Start with 'A1000' if there are no existing attendance IDs
+                    else:
+                    
+                        last_id = int(max_attendance_id[1:])  # Extract the numeric part of the last attendance ID
+                        new_attendance_id = 'A' + str(last_id + 1) # Increment and format the new attendance ID
+                   
+                    cursor.execute('INSERT INTO attendance (attendance_id, instructor_id, student_id, section_id, date, status) VALUES (?, ?, ?, ?, ?, ?)',
+                                   (new_attendance_id, self.instructor_id, student_id, section, date, student_status))
+
+            self.conn.commit()
+            messagebox.showinfo("Success", "Attendance submitted successfully!")
+            
+    def logout(self):
+        self.root.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\login_register.py'])
+
+    def back(self):
+        self.root.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\instructor_dashboard.py', username], check=True)
+
+    def on_mousewheel(self, event):
+        self.canvas.yview_scroll(-1*(event.delta//120), "units")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.state('zoomed')
+    root.geometry("800x600")
+    if len(sys.argv) >= 2:
+        username = sys.argv[1]
+        print(f"Username received in student_dashboard.py: {username}")
+    else:
+        username = 'kumar1v'
+    instructor_id = username 
+    app = AttendanceApp(root)
+    root.mainloop()
+
+**********************************************************************************************************************************************************************************
+Student Attendance Page(check_attend_try.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import sqlite3
+import sys
+import subprocess
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
+
+class StudentAttendanceApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Student Attendance Checker")
+        self.root.geometry("800x600")
+        self.root.configure(bg="#00415a")
+        # Connect to SQLite database
+        self.conn = sqlite3.connect('user.db')
+
+        # Get student ID
+        self.student_id = username
+
+
+        # Label to display full name
+        self.full_name_display_label = tk.Label(root, text="", font=('Arial', 14, 'bold'), bg="#00415a", fg="white")
+        self.full_name_display_label.place(relx=0.1, rely=0.025)
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT first_name, last_name FROM users WHERE user_id = ?", (self.student_id,))
+        full_name = cursor.fetchone()
+        if full_name:
+            self.full_name_display_label.config(text=f" {full_name[0]} {full_name[1]}")
+
+        # Section Label
+        section_label = tk.Label(root, text="Section:", font=('Arial', 14, 'bold'), bg="#00415a", fg="white")
+        section_label.place(relx=0.4, rely=0.02)
+
+        # Section Dropdown
+        self.section_var = tk.StringVar()
+        self.section_dropdown = ttk.Combobox(root, textvariable=self.section_var, width=25)
+        self.section_dropdown.place(relx=0.48, rely=0.025)
+
+        # Display Attendance Button
+        display_btn = tk.Button(root, text="Display Attendance", command=self.display_attendance, bg='#87CEEB')
+        display_btn.place(relx=0.8, rely=0.02,relwidth=0.1, relheight=0.05)
+
+        # Print Attendance Button
+        print_btn = tk.Button(root, text="Print", command=self.generate_pdf, bg='#87CEEB')
+        print_btn.place(relx=0.5, rely=0.9,relwidth=0.1, relheight=0.05)
+
+        self.style = ttk.Style()
+        self.style.theme_use("clam")
+        self.style.configure("Treeview", background="#00415a", fieldbackground="#00415a", font=("Arial", 12))
+        # Configure style for Treeview headings
+        self.style.configure("Treeview.Heading",
+                             background="#00415a",  # Heading background color
+                             foreground="white",  # Heading font color
+                             font=("Helvetica", 12, "bold"))  # Heading font
+        # Attendance Treeview
+        self.attendance_tree = ttk.Treeview(root, columns=('Date', 'Status'), show="headings", height=18)
+        self.attendance_tree.heading('Date', text='Date')
+        self.attendance_tree.heading('Status', text='Status')
+        self.attendance_tree.column('Date', width=150)
+        self.attendance_tree.column('Status', width=150)
+        self.attendance_tree.place(relx=0.01, rely=0.15, relwidth=0.98, relheight=0.7)
+
+        # Back Button
+        self.back_button = tk.Button(root, text="Back", command=self.back, bg='#87CEEB')
+        self.back_button.place(relx=0.78, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        # Logout Button
+        self.logout_button = tk.Button(root, text="Logout", command=self.logout, bg='#87CEEB')
+        self.logout_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+    def populate_sections_dropdown(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT section_id FROM course_reg WHERE student_id = ? AND (status='y' OR status='d')", (self.student_id,))
+        sections = cursor.fetchall()
+        self.section_dropdown['values'] = [section[0] for section in sections]
+
+    def display_attendance(self):
+        section_id = self.section_var.get()
+        cursor = self.conn.cursor()
+
+        # Fetch section details
+        cursor.execute("SELECT course_name FROM section JOIN course ON section.course_id = course.course_id WHERE section_id = ?", (section_id,))
+        section_details = cursor.fetchone()
+
+        # Fetch attendance for the selected section and student
+        cursor.execute("SELECT date, status FROM attendance WHERE student_id = ? AND section_id = ?", (self.student_id, section_id))
+        attendance_data = cursor.fetchall()
+
+        # Clear previous entries
+        self.attendance_tree.delete(*self.attendance_tree.get_children())
+        tag = "even"
+        # Display attendance
+        for date, status in attendance_data:
+            self.attendance_tree.insert('', 'end', values=(date, status), tags=(tag,))
+            tag = "odd" if tag == "even" else "even"
+        self.attendance_tree.tag_configure("even", background="#f2f2f2")
+        self.attendance_tree.tag_configure("odd", background="#ffffff")
+
+    def generate_pdf(self):
+        # Prompt user to select a file location to save the PDF
+        file_path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
+        if not file_path:
+            return  # User canceled operation or provided invalid file path
+
+        # Retrieve student details
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT first_name, last_name FROM users WHERE user_id = ?", (self.student_id,))
+        student_name = " ".join(cursor.fetchone())
+
+        section_id = self.section_var.get()
+
+        # Fetch section details
+        cursor.execute("SELECT course_name FROM section JOIN course ON section.course_id = course.course_id WHERE section_id = ?", (section_id,))
+        section_details = cursor.fetchone()
+
+        # Fetch attendance for the selected section and student
+        cursor.execute("SELECT date, status FROM attendance WHERE student_id = ? AND section_id = ?", (self.student_id, section_id))
+        attendance_data = cursor.fetchall()
+
+        # Create a PDF document
+        pdf_file = SimpleDocTemplate(file_path, pagesize=letter)
+        styles = getSampleStyleSheet()
+
+        # Content for the PDF
+        content = []
+
+        # Title
+        title_style = styles["Title"]
+        title = Paragraph("Student Attendance Report", title_style)
+        content.append(title)
+
+        # Student Details
+        student_details = f"Student Name: {student_name}\nSection ID: {section_id}\nCourse Name: {section_details[0]}\n\n"
+        student_details_paragraph = Paragraph(student_details, styles["Normal"])
+        content.append(student_details_paragraph)
+
+        # Attendance Data
+        table_data = [["Date", "Status"]]
+        for date, status in attendance_data:
+            table_data.append([date, status])
+
+        # Table Header and Data
+        table = Table(table_data, colWidths=[200, 200])
+        table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+                                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                                ('GRID', (0, 0), (-1, -1), 1, colors.black)]))
+        content.append(table)
+
+        # Build PDF
+        pdf_file.build(content)
+
+        messagebox.showinfo("Success", "PDF generated successfully.")
+
+    def logout(self):
+        self.root.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\login_register.py'])
+
+    def back(self):
+        self.root.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\student_dashboard.py', username], check=True)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.state('zoomed')
+    root.configure(bg="#00415a")
+    if len(sys.argv) >= 2:
+        username = sys.argv[1]
+        print(f"Username received in student_attendance.py: {username}")
+    else:
+        username = 'musuk2s'
+    app = StudentAttendanceApp(root)
+    app.populate_sections_dropdown()  # Populate sections dropdown
+    root.mainloop()
+
+**********************************************************************************************************************************************************************************
+Instructor Course Registration Page(course_reg_instructor.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+import subprocess
+import sys
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+class InstructorApprovalView(tk.Tk):
+    def __init__(self, instructor_id):
+        super().__init__()
+
+        self.title("Instructor Approval View")
+        self.state('zoomed')
+        self.geometry("800x600")
+        self.configure(bg="#00415a")
+
+        self.db_conn = sqlite3.connect("user.db")
+        self.cursor = self.db_conn.cursor()
+        self.instructor_id = instructor_id
+
+        self.create_widgets()
+
+        self.populate_sections()
+
+    def create_widgets(self):
+        self.style = ttk.Style()
+        self.style.theme_use("clam")  # Use the "clam" theme
+
+        # Configure style for Treeview widget
+        self.style.configure("NoBorder.Treeview",
+                             background="#00415a",  # Background color
+                             foreground="black",  # Font color
+                             fieldbackground="#00415a",
+                             font=("Helvetica", 12))
+
+        # Configure style for Treeview headings
+        self.style.configure("NoBorder.Treeview.Heading",
+                             background="#00415a",  # Heading background color
+                             foreground="white",  # Heading font color
+                             font=("Helvetica", 12, "bold"))
+
+        columns = ("Request ID", "Student ID", "Section ID", "Course Name", "Status")
+        self.section_tree = ttk.Treeview(self, columns=columns, show="headings", style="NoBorder.Treeview", height=24)
+        self.section_tree.place(relx=0.01, rely=0.01, relwidth=0.98, relheight=0.85)
+        self.section_tree.heading("Request ID", text="Request ID")
+        self.section_tree.heading("Student ID", text="Student ID")
+        self.section_tree.heading("Section ID", text="Section ID")
+        self.section_tree.heading("Course Name", text="Course Name")
+        self.section_tree.heading("Status", text="Action")  # Add Status column
+
+        self.section_tree.column("Request ID", width=100)
+        self.section_tree.column("Student ID", width=100)
+        self.section_tree.column("Section ID", width=100)
+        self.section_tree.column("Course Name", width=180)
+        self.section_tree.column("Status", width=100)
+        
+        self.approve_button = tk.Button(self, text="Approve", command=self.approve_section, bg='#87CEEB')
+        self.approve_button.place(relx=0.01, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.reject_button = tk.Button(self, text="Reject", command=self.reject_section, bg='#87CEEB')
+        self.reject_button.place(relx=0.12, rely=0.9, relwidth=0.11, relheight=0.05)
+
+        self.logout_button = tk.Button(self, text="Logout", command=self.logout, bg='#87CEEB')
+        self.logout_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.back_button = tk.Button(self, text="Back", command=self.back, bg='#87CEEB')
+        self.back_button.place(relx=0.78, rely=0.9, relwidth=0.1, relheight=0.05)
+
+    def populate_sections(self):
+        self.cursor.execute("SELECT course_reg.request_id, course_reg.student_id, section.section_id, course.course_name, course_reg.status FROM course_reg INNER JOIN section ON course_reg.section_id = section.section_id INNER JOIN course ON section.course_id = course.course_id WHERE section.instructor_id = ? AND course_reg.status IN ('r', 'd')", (self.instructor_id,))
+        sections = self.cursor.fetchall()
+        self.section_tree.delete(*self.section_tree.get_children())
+        tag = "even"
+        for section in sections:
+            status = "Registered" if section[4] == 'r' else "Dropped"
+            self.section_tree.insert("", "end", values=section[:4] + (status,), tags=(tag,))
+            tag = "odd" if tag == "even" else "even"
+        self.section_tree.tag_configure("even", background="#f2f2f2")
+        self.section_tree.tag_configure("odd", background="#ffffff")
+
+    def send_email_notification(self, request_id, action):
+        try:
+            self.cursor.execute("SELECT student_id FROM course_reg WHERE request_id = ?", (request_id,))
+            student_id = self.cursor.fetchone()
+            if student_id is None:
+                messagebox.showerror("Error", "Student ID not found for the given request ID.")
+                return
+            student_id = student_id[0]
+
+            self.cursor.execute("SELECT first_name, last_name, email FROM users WHERE user_id = ?", (student_id,))
+            student_info = self.cursor.fetchone()
+            if student_info is None:
+                messagebox.showerror("Error", "Student information not found for the given student ID.")
+                return
+            first_name, last_name, student_email = student_info
+
+            sender_email = ""  # Your email address
+            receiver_email = student_email  # Student's email address
+
+            if action == "Course Registration Request Approved":
+                subject = f"Course Registration Approved - {request_id}"
+                message = f"Hello {first_name} {last_name},\n\nYour course registration request with Request ID {request_id} has been approved by the instructor.\n\nBest Regards,\nCMU High School"
+            elif action == "Course Drop Request Approved":
+                subject = f"Course Drop Approved - {request_id}"
+                message = f"Hello {first_name} {last_name},\n\nYour course drop request with Request ID {request_id} has been approved by the instructor.\n\nBest Regards,\nCMU High School"
+            elif action == "Course Registration Request Rejected":
+                subject = f"Course Registration Rejected - {request_id}"
+                message = f"Hello {first_name} {last_name},\n\nYour course registration request with Request ID {request_id} has been rejected by the instructor.\n\nBest Regards,\nCMU High School"
+            elif action == "Course Drop Request Rejected":
+                subject = f"Course Drop Rejected - {request_id}"
+                message = f"Hello {first_name} {last_name},\n\nYour course drop request with Request ID {request_id} has been rejected by the instructor.\n\nBest Regards,\nCMU High School"
+
+            # Create message container
+            msg = MIMEMultipart()
+            msg['From'] = sender_email
+            msg['To'] = receiver_email
+            msg['Subject'] = subject
+
+            # Attach message
+            msg.attach(MIMEText(message, 'plain'))
+
+            # Send email
+            smtp_server = "smtp.gmail.com"  # Your SMTP server address
+            smtp_port = 587  # Your SMTP port
+            smtp_username = sender_email  # Your SMTP username
+            smtp_password = ""  # Your SMTP password
+
+            server = smtplib.SMTP(smtp_server, smtp_port)
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+            server.quit()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to send email notification: {str(e)}")
+
+    def approve_section(self):
+        selected_item = self.section_tree.selection()
+        if not selected_item:
+            messagebox.showerror("Error", "No section selected.")
+            return
+
+        request_id = self.section_tree.item(selected_item, "values")[0]
+        status = self.section_tree.item(selected_item, "values")[4]
+
+        if status == 'Registered':
+            self.send_email_notification(request_id, "Course Registration Request Approved")
+            self.cursor.execute("UPDATE course_reg SET status = 'y' WHERE request_id = ?", (request_id,))
+            messagebox.showinfo("Success", f"Course Registration Request Approved")
+            
+        elif status == 'Dropped':
+            self.send_email_notification(request_id, "Course Drop Request Approved")
+            self.cursor.execute("DELETE FROM course_reg WHERE request_id = ?", (request_id,))
+            self.cursor.execute("DELETE FROM grade WHERE (student_id, section_id) IN (SELECT student_id, section_id FROM course_reg WHERE request_id = ?)", (request_id,))
+            self.cursor.execute("DELETE FROM attendance WHERE (student_id, section_id) IN (SELECT student_id, section_id FROM course_reg WHERE request_id = ?)", (request_id,))
+            messagebox.showinfo("Success", f"Drop Request Accepted")
+        self.db_conn.commit()
+        self.populate_sections()
+
+    def reject_section(self):
+        selected_item = self.section_tree.selection()
+        if not selected_item:
+            messagebox.showerror("Error", "No section selected.")
+            return
+
+        request_id = self.section_tree.item(selected_item, "values")[0]
+        status = self.section_tree.item(selected_item, "values")[4]
+
+        if status == 'Registered':
+            self.send_email_notification(request_id, "Course Registration Request Rejected")
+            self.cursor.execute("DELETE FROM course_reg WHERE request_id = ?", (request_id,))
+            messagebox.showinfo("Success", f"Course Registration Request Rejected")
+        elif status == 'Dropped':
+            self.send_email_notification(request_id, "Course Drop Request Rejected")
+            self.cursor.execute("UPDATE course_reg SET status = 'y' WHERE request_id = ?", (request_id,))
+            messagebox.showinfo("Success", f"Drop Request Rejected")
+
+
+        self.db_conn.commit()
+        self.populate_sections()
+        
+    def logout(self):
+        self.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\login_register.py'])
+        
+    def back(self):
+        self.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\instructor_dashboard.py', username], check=True)
+
+    def __del__(self):
+        self.db_conn.close()
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 2:
+        username = sys.argv[1]
+        print(f"Username received in course_instructor.py: {username}")
+    else:
+        username = 'kumar1v'
+    instructor_id = username  # Specify the instructor ID
+    app = InstructorApprovalView(instructor_id)
+    app.mainloop()
+
+**********************************************************************************************************************************************************************************
+Student Course Registration Page(course_reg_student.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import ttk
+import sqlite3
+import sys
+import subprocess
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+class RegisterSectionsPage(tk.Tk):
+    def __init__(self, student_id):
+        super().__init__()
+        self.title("Register Sections")
+        self.geometry("900x600")
+        self.state('zoomed')
+        self.student_id = student_id
+        self.configure(bg="#00415a") 
+
+        self.db_conn = sqlite3.connect("user.db")
+        self.cursor = self.db_conn.cursor()
+
+        self.create_widgets()
+        self.populate_sections()
+
+    def create_widgets(self):
+        self.style = ttk.Style()
+        self.style.theme_use("clam")  # Use the "clam" theme
+
+        # Configure style for Treeview widget
+        self.style.configure("Treeview",
+                             background="#00415a",  # Background color
+                             foreground="black",  # Font color
+                             fieldbackground="#00415a",
+                             font=("Helvetica", 12))  # Field background color
+
+        # Configure style for Treeview headings
+        self.style.configure("Treeview.Heading",
+                             background="#00415a",  # Heading background color
+                             foreground="white",  # Heading font color
+                             font=("Helvetica", 12, "bold"))  # Heading font
+
+        self.section_tree = ttk.Treeview(self, columns=("Section ID", "Course Name", "Instructor", "Start Time", "End Time", "Class Room"), show="headings", height=24)
+        self.section_tree.place(relx=0.01, rely=0.01, relwidth=0.98, relheight=0.85)
+
+        self.section_tree.heading("Section ID", text="Section ID")
+        self.section_tree.heading("Course Name", text="Course Name")
+        self.section_tree.heading("Instructor", text="Instructor")
+        self.section_tree.heading("Start Time", text="Start Time")
+        self.section_tree.heading("End Time", text="End Time")
+        self.section_tree.heading("Class Room", text="Class Room")
+
+        self.section_tree.column("Section ID", width=110)
+        self.section_tree.column("Course Name", width=180)
+        self.section_tree.column("Instructor", width=200)
+        self.section_tree.column("Start Time", width=180)
+        self.section_tree.column("End Time", width=180)
+        self.section_tree.column("Class Room", width=110)
+
+        self.register_button = tk.Button(self, text="Register", command=self.register_section, bg='#87CEEB')
+        self.register_button.place(relx=0.01, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.back_button = tk.Button(self, text="Back", command=self.back, bg='#87CEEB')
+        self.back_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+    def populate_sections(self):
+        self.cursor.execute("SELECT section.section_id, course.course_name, users.first_name || ' ' || users.last_name, section.start_time, section.end_time, section.class_room FROM section \
+            LEFT JOIN course_reg ON section.section_id = course_reg.section_id AND course_reg.student_id = ? \
+            INNER JOIN course ON section.course_id = course.course_id \
+            INNER JOIN users ON section.instructor_id = users.user_id \
+            INNER JOIN users AS u ON u.user_id = ? AND course.class = u.class \
+            WHERE course_reg.student_id IS NULL \
+            AND section.course_id NOT IN (SELECT section.course_id FROM section \
+                                            INNER JOIN course_reg ON section.section_id = course_reg.section_id \
+                                            WHERE course_reg.student_id = ?) \
+            ORDER BY section.section_id ", (self.student_id, self.student_id, self.student_id))
+
+        sections = self.cursor.fetchall()
+        self.section_tree.delete(*self.section_tree.get_children())
+        tag = "even"
+        for section in sections:
+            self.section_tree.insert("", "end", values=section, tags=(tag,))
+            tag = "odd" if tag == "even" else "even"
+        self.section_tree.tag_configure("even", background="#f2f2f2")
+        self.section_tree.tag_configure("odd", background="#ffffff")
+
+    def generate_request_id(self):
+        # Retrieve the maximum Request ID
+        max_request_id_result = self.cursor.execute("SELECT MAX(request_id) FROM course_reg").fetchone()
+        if max_request_id_result is None or max_request_id_result[0] is None:
+            new_request_id = 'R1000'  
+        else:
+            max_request_id = max_request_id_result[0]
+            last_id = int(max_request_id[1:]) 
+            new_request_id = 'R' + str(last_id + 1) 
+        return new_request_id
+
+    def send_email_to_instructor(self, instructor_email,course_name,section_id,request_id,student_name):
+        try:
+            sender_email = ""  # Your email address
+            receiver_email = instructor_email  # Instructor's email address
+            subject = f"Course Registration Request: {request_id}"
+            message = f"New Course Registration Request\n\nRequest ID: {request_id}\nCourse: {course_name}\nSection: {section_id}\nStudent Name: {student_name}\n\nBest Regards,\nCMU High School"
+
+           
+            msg = MIMEMultipart()
+            msg['From'] = sender_email
+            msg['To'] = receiver_email
+            msg['Subject'] = subject
+
+           
+            msg.attach(MIMEText(message, 'plain'))
+
+            
+            smtp_server = "smtp.gmail.com"  # Your SMTP server address
+            smtp_port = 587  # Your SMTP port
+            smtp_username = sender_email  # Your SMTP username
+            smtp_password = ""  # Your SMTP password
+
+            server = smtplib.SMTP(smtp_server, smtp_port)
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+            server.quit()
+        except Exception as e:
+            print("Failed to send email:", e)
+
+    def register_section(self):
+        selected_section = self.section_tree.focus()
+        if selected_section:
+            section_info = self.section_tree.item(selected_section, "values")
+            section_id = section_info[0]
+            course_name = section_info[1]
+            
+            # Retrieve the instructor's email by joining the section and users tables
+            self.cursor.execute("SELECT users.email FROM section INNER JOIN users ON section.instructor_id = users.user_id WHERE section.section_id = ?", (section_id,))
+            instructor_email = self.cursor.fetchone()[0]
+            self.cursor.execute("SELECT first_name||' ' ||last_name FROM users WHERE user_id = ?", (self.student_id,))
+            student_name = self.cursor.fetchone()[0]
+            print(instructor_email)
+            request_id=self.generate_request_id()
+            # Insert the record into the database
+            self.cursor.execute("INSERT INTO course_reg (request_id, student_id, section_id, status) VALUES (?, ?, ?, 'r')", (request_id, self.student_id, section_id))
+            self.db_conn.commit()
+            self.populate_sections()
+            self.send_email_to_instructor(instructor_email,course_name, section_id,request_id,student_name)
+
+    def back(self):
+        self.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\course_view_student.py', self.student_id], check=True)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 2:
+        username = sys.argv[1]
+        print(f"Username received in student_dashboard.py: {username}")
+    else:
+        username = 'raoch2c'
+    student_id = username
+
+    app = RegisterSectionsPage(student_id)
+    app.mainloop()
+
+**********************************************************************************************************************************************************************************
+Instructor Registered Courses View Page(course_view_student.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import sys
+import sqlite3
+import subprocess
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+class RegisteredCoursesView(tk.Tk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("Registered Courses View")
+        self.state('zoomed')
+        self.geometry("1000x600")
+        self.configure(bg="#00415a")
+
+        self.db_conn = sqlite3.connect("user.db")
+        self.cursor = self.db_conn.cursor()
+
+        self.create_widgets()
+
+        
+        if len(sys.argv) >= 2:
+            self.student_id = sys.argv[1]
+            print(f"Username received in student_course_view.py: {self.student_id}")
+        else:
+            self.student_id = 'raoch2c'
+
+        self.populate_sections()
+
+    def create_widgets(self):
+        self.style = ttk.Style()
+        self.style.theme_use("clam")  # Use the "clam" theme
+
+        # Configure style for Treeview widget
+        self.style.configure("NoBorder.Treeview",
+                             background="#00415a",  # Background color
+                             foreground="black",  # Font color
+                             fieldbackground="#00415a",
+                             font=("Helvetica", 12))
+
+        # Configure style for Treeview headings
+        self.style.configure("NoBorder.Treeview.Heading",
+                             background="#00415a",  # Heading background color
+                             foreground="white",  # Heading font color
+                             font=("Helvetica", 12, "bold"))
+
+        self.section_tree = ttk.Treeview(self, columns=("Section ID", "Course Name", "Instructor", "Start Time", "End Time", "Class Room", "Status"), show="headings", height=24, style="NoBorder.Treeview")
+        self.section_tree.place(relx=0.01, rely=0.01, relwidth=0.98, relheight=0.85)
+
+        self.section_tree.heading("Section ID", text="Section ID")
+        self.section_tree.heading("Course Name", text="Course Name")
+        self.section_tree.heading("Instructor", text="Instructor")
+        self.section_tree.heading("Start Time", text="Start Time")
+        self.section_tree.heading("End Time", text="End Time")
+        self.section_tree.heading("Class Room", text="Class Room")
+        self.section_tree.heading("Status", text="Status")  # Add Status column
+
+        self.drop_button = tk.Button(self, text="Drop Section", command=self.drop_section, bg='#87CEEB')
+        self.drop_button.place(relx=0.01, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.register_button = tk.Button(self, text="Register Courses", command=self.register_section, bg='#87CEEB')
+        self.register_button.place(relx=0.12, rely=0.9, relwidth=0.11, relheight=0.05)
+
+        self.print_button = tk.Button(self, text="Print", command=self.generate_pdf, bg='#87CEEB')
+        self.print_button.place(relx=0.45, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.back_button = tk.Button(self, text="Back", command=self.back, bg='#87CEEB')
+        self.back_button.place(relx=0.78, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.logout_button = tk.Button(self, text="Logout", command=self.logout, bg='#87CEEB')
+        self.logout_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+    def populate_sections(self):
+        self.cursor.execute("SELECT section.section_id, course.course_name, users.first_name || ' ' || users.last_name, section.start_time, section.end_time, section.class_room, course_reg.status FROM section INNER JOIN course_reg ON section.section_id = course_reg.section_id INNER JOIN course ON section.course_id = course.course_id INNER JOIN users ON section.instructor_id = users.user_id WHERE course_reg.student_id = ? and (course_reg.status = 'y' OR course_reg.status = 'd')", (self.student_id,))
+        sections = self.cursor.fetchall()
+        self.section_tree.delete(*self.section_tree.get_children())
+        tag = "even"
+        for section in sections:
+            status = "Registered" if section[6] == 'y' else "Dropped"
+            self.section_tree.insert("", "end", values=section[:6] + (status,), tags=(tag,))
+            tag = "odd" if tag == "even" else "even"
+        self.section_tree.tag_configure("even", background="#f2f2f2")
+        self.section_tree.tag_configure("odd", background="#ffffff")
+
+    def drop_section(self):
+        selected_item = self.section_tree.selection()
+        if not selected_item:
+            print("Error: No section selected.")
+            return
+
+        section_id = self.section_tree.item(selected_item, "values")[0]
+        self.cursor.execute("SELECT request_id, status, instructor_id FROM course_reg INNER JOIN section ON course_reg.section_id = section.section_id WHERE section.section_id = ? AND course_reg.student_id = ?", (section_id, self.student_id))
+        result = self.cursor.fetchone()
+
+        if result:
+            request_id, status, instructor_id = result
+            if status == 'd':
+                messagebox.showerror("Section Already Dropped", "The section is already dropped. Please wait for instructor confirmation.")
+            else:
+                # Update course registration status to 'd' (dropped)
+                self.cursor.execute("UPDATE course_reg SET status = 'd' WHERE request_id = ?", (request_id,))
+                self.db_conn.commit()
+                
+                # Retrieve instructor's email
+                self.cursor.execute("SELECT email FROM users WHERE user_id = ?", (instructor_id,))
+                instructor_email = self.cursor.fetchone()[0]
+                
+                # Send email notification to the instructor
+                self.send_email_to_instructor(instructor_email, section_id, request_id)
+                messagebox.showinfo("Success", f"Drop Request Sent")
+                # Repopulate sections
+                self.populate_sections()
+        else:
+            print("Error: Request ID not found")
+
+    def send_email_to_instructor(self, instructor_email, section_id, request_id):
+        try:
+            sender_email = ""  # Your email address
+            receiver_email = instructor_email  # Instructor's email address
+            subject = f"Course Drop Request: {section_id}"
+            message = f"New Course Drop Request\n\nRequest ID: {request_id}\nSection ID: {section_id}.\n\n\nBest Regards,\nYour School Name"
+
+            # Create message container
+            msg = MIMEMultipart()
+            msg['From'] = sender_email
+            msg['To'] = receiver_email
+            msg['Subject'] = subject
+
+            # Attach message
+            msg.attach(MIMEText(message, 'plain'))
+
+            # Send email
+            smtp_server = "smtp.gmail.com"  # Your SMTP server address
+            smtp_port = 587  # Your SMTP port
+            smtp_username = sender_email  # Your SMTP username
+            smtp_password = ""  # Your SMTP password
+
+            server = smtplib.SMTP(smtp_server, smtp_port)
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+            server.quit()
+        except Exception as e:
+            print("Failed to send email:", e)
+
+    def register_section(self):
+        print('register')
+        self.destroy()
+        subprocess.run(['python', r'E:\cmu\BIS 698\misc code\Course_reg_student.py', self.student_id], check=True)
+        print("Logout button clicked")
+
+    def generate_pdf(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
+        if not file_path:
+            return
+
+        # Fetch student name
+        self.cursor.execute("SELECT first_name, last_name FROM users WHERE user_id = ?", (self.student_id,))
+        name = self.cursor.fetchone()
+        student_name = " ".join(name) if name else "Unknown"
+
+        content = []
+
+        
+        title_style = getSampleStyleSheet()["Title"]
+
+        
+        normal_style = getSampleStyleSheet()["Normal"]
+
+        
+        content.append(Paragraph("Registered Courses Report", title_style))
+
+        
+        content.append(Paragraph(f"Student Name: {student_name}", normal_style))
+
+       
+        table_data = [["Section ID", "Course Name", "Instructor", "Start Time", "End Time", "Class Room", "Status"]]
+        for item in self.section_tree.get_children():
+            values = self.section_tree.item(item, "values")
+            table_data.append(values)
+
+        
+        table_style = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]
+
+        
+        table = Table(table_data, colWidths=[50, 120, 120, 120, 120, 60, 80])
+        table.setStyle(TableStyle(table_style))
+        content.append(table)
+
+        
+        pdf_file = SimpleDocTemplate(file_path, pagesize=letter, leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
+        pdf_file.pagesize = (letter[1], letter[0])  # Swap width and height for landscape
+        pdf_file.build(content)
+
+        messagebox.showinfo("Success", "PDF generated successfully.")
+
+    def logout(self):
+        self.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\login_register.py'])
+
+    def back(self):
+        self.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\student_dashboard.py', self.student_id], check=True)
+
+    def __del__(self):
+        self.db_conn.close()
+
+if __name__ == "__main__":
+    app = RegisteredCoursesView()
+    app.mainloop()
+
+**********************************************************************************************************************************************************************************
+Instructor Grade Page(instructor_grade.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sys
+import sqlite3
+import subprocess
+
+class InstructorGradeApp:
+    def __init__(self, root, instructor_id):
+        self.root = root
+        self.root.title("Instructor Grade Management")
+        self.root.geometry("800x600")
+        self.root.configure(bg="#00415a")
+        # Connect to SQLite3 database
+        self.conn = sqlite3.connect('user.db')
+        self.c = self.conn.cursor()
+        self.grade_data = {
+            "A": {"gpa": 4.0, "percentage_range": "(90-100)"},
+            "A-": {"gpa": 3.7, "percentage_range": "(85-89)"},
+            "B+": {"gpa": 3.3, "percentage_range": "(80-84)"},
+            "B": {"gpa": 3.0, "percentage_range": "(75-79)"},
+            "B-": {"gpa": 2.7, "percentage_range": "(70-74)"},
+            "C+": {"gpa": 2.3, "percentage_range": "(65-69)"},
+            "C": {"gpa": 2.0, "percentage_range": "(60-64)"},
+            "C-": {"gpa": 1.7, "percentage_range": "(55-59)"},
+            "D+": {"gpa": 1.3, "percentage_range": "(50-54)"},
+            "D": {"gpa": 1.0, "percentage_range": "(45-49)"},
+            "D-": {"gpa": 0.7, "percentage_range": "(40-44)"},
+            "E": {"gpa": 0.0, "percentage_range": "(Below 40)"}
+        }
+        self.instructor_id = instructor_id
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        self.section_label = tk.Label(self.root, text="Select Section:", font=('Arial', 10, 'bold'), foreground="white", background="#00415a")
+        self.section_label.place(relx=0.01, rely=0.02)
+        self.section_var = tk.StringVar()
+        self.section_combobox = ttk.Combobox(self.root, textvariable=self.section_var, state="readonly")
+        self.section_combobox.place(relx=0.15, rely=0.02)
+
+        self.course_name_label = tk.Label(self.root, text="Course: ", font=('Arial', 10, 'bold'),foreground="white", background="#00415a")
+        self.course_name_label.place(relx=0.5, rely=0.02,relheight=0.5)
+
+        # Create a canvas to hold the student grades frame with scrolling capability
+        self.canvas = tk.Canvas(self.root, bg="#00415a", bd=0, highlightthickness=0)
+        self.canvas.place(relx=0.2, rely=0.1, relwidth=0.68, relheight=0.7)  # Adjust relheight as needed
+
+        # Add a scrollbar for the canvas
+        self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
+        self.scrollbar.place(relx=0.98, rely=0.1, relheight=0.75)
+
+        # Create a frame within the canvas to hold the student grades
+        self.student_grades_frame = tk.Frame(self.canvas, bg="#00415a", width=750, height=400)  # Adjust width and height as needed
+        self.canvas.create_window((0, 0), window=self.student_grades_frame, anchor="nw")
+
+        self.add_grades_button = tk.Button(self.root, text="Add Grades", command=self.add_grades, bg='#87CEEB', font=('Arial', 10, 'bold'))
+        self.add_grades_button.place(relx=0.01, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.logout_button = tk.Button(self.root, text="Logout", command=self.logout, bg='#87CEEB', font=('Arial', 10, 'bold'))
+        self.logout_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.back_button = tk.Button(self.root, text="Back", command=self.back, bg='#87CEEB', font=('Arial', 10, 'bold'))
+        self.back_button.place(relx=0.78, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        #grade details
+        self.grade_details_frame = tk.Frame(self.root, bg="#00415a")
+        self.grade_details_frame.place(relx=0.6, rely=0.1, relwidth=0.25, relheight=0.75)
+        tk.Label(self.grade_details_frame, text="Grade", font=('Arial', 10, 'bold'), foreground="white", background="#00415a").grid(row=0, column=0, padx=10, pady=5)
+        tk.Label(self.grade_details_frame, text="GPA", font=('Arial', 10, 'bold'), foreground="white", background="#00415a").grid(row=0, column=1, padx=10, pady=5)
+        tk.Label(self.grade_details_frame, text="Percentage Range", font=('Arial', 10, 'bold'), foreground="white", background="#00415a").grid(row=0, column=2, padx=10, pady=5)
+        grade_labels = ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'E']
+        for i, grade in enumerate(grade_labels):
+            grade_label = tk.Label(self.grade_details_frame, text=grade, font=('Arial', 10), foreground="white", background="#00415a")
+            grade_label.grid(row=i+1, column=0, padx=20, pady=5)
+
+            # Add corresponding GPA
+            gpa_label = tk.Label(self.grade_details_frame, text=self.grade_data[grade]["gpa"], font=('Arial', 10), foreground="white", background="#00415a")
+            gpa_label.grid(row=i+1, column=1, padx=20, pady=5)
+
+            # Add corresponding percentage range
+            percentage_label = tk.Label(self.grade_details_frame, text=self.grade_data[grade]["percentage_range"], font=('Arial', 10), foreground="white", background="#00415a")
+            percentage_label.grid(row=i+1, column=2, padx=20, pady=5)
+        # Populate section dropdown
+        self.populate_section_dropdown()
+        self.section_combobox.bind("<<ComboboxSelected>>", self.load_students)
+
+        # Configure the canvas to scroll
+        self.canvas.bind_all("<MouseWheel>", self.on_mousewheel)
+
+    def on_mousewheel(self, event):
+        self.canvas.yview_scroll(-1 * int(event.delta / 120), "units")
+
+    def populate_section_dropdown(self):
+        try:
+            sections = self.c.execute("SELECT section_id FROM section WHERE instructor_id=?", (self.instructor_id,)).fetchall()
+            self.section_combobox["values"] = [section[0] for section in sections]
+        except sqlite3.Error as e:
+            messagebox.showerror("Error", f"Error fetching sections: {e}")
+
+    def load_students(self, event):
+        section_id = self.section_var.get()
+        if not section_id:
+            messagebox.showerror("Error", "Please select a section.")
+            return
+
+        try:
+            course_name = self.c.execute("SELECT course.course_name FROM section INNER JOIN course ON section.course_id = course.course_id WHERE section.section_id=?", (section_id,)).fetchone()[0]
+            self.course_name_label.config(text="Course: "+course_name)
+            print(course_name)
+
+            self.students = self.c.execute("SELECT users.user_id, users.first_name, users.last_name FROM users INNER JOIN course_reg ON users.user_id = course_reg.student_id WHERE course_reg.section_id=? AND users.role= 'Student' AND course_reg.status='y'", (section_id,)).fetchall()
+
+            # Clear any existing widgets in the student_grades_frame
+            for widget in self.student_grades_frame.winfo_children():
+                widget.destroy()
+
+            # Dictionary to store existing grades
+            self.existing_grades = {}
+
+            # Add student names and grade entry fields
+            for i, student in enumerate(self.students):
+                student_name = f"{student[1]} {student[2]}"
+                student_label = tk.Label(self.student_grades_frame, text=student_name, foreground="white", background="#00415a", font=('Arial', 10, 'bold'))
+                student_label.grid(row=i, column=0, padx=5, pady=5)
+
+                grade_var = tk.StringVar()
+                grade = self.c.execute("SELECT grade FROM grade WHERE grade.section_id=? AND student_id=? AND course_id=(SELECT course_id FROM section WHERE section.section_id=?)", (section_id,student[0], section_id)).fetchone()
+                if grade:
+                    grade_var.set(grade[0])
+                    self.existing_grades[student[0]] = grade[0]  # Store existing grade in the dictionary
+                else:
+                    self.existing_grades[student[0]] = None
+
+                # Adding validation for grade entry
+                validate_grade = self.root.register(self.validate_grade)
+                grade_entry = tk.Entry(self.student_grades_frame, textvariable=grade_var, validate="key", validatecommand=(validate_grade, "%P"))
+                grade_entry.grid(row=i, column=1, padx=5, pady=5)
+
+            # Update the scroll region of the canvas
+            self.canvas.update_idletasks()  # Ensure all widgets are properly configured
+            self.canvas.config(scrollregion=self.canvas.bbox("all"))
+        except sqlite3.Error as e:
+            messagebox.showerror("Error", f"Error fetching students: {e}")
+
+    def add_grades(self):
+        section_id = self.section_var.get()
+        if not section_id:
+            messagebox.showerror("Error", "Please select a section.")
+            return
+
+        try:
+            for student in self.students:
+                student_id = student[0]
+                grade = None  # Set grade to None initially
+                for child in self.student_grades_frame.winfo_children():
+                    if isinstance(child, tk.Entry):
+                        if child.grid_info()["row"] == self.students.index(student):
+                            grade = child.get()  # Get the grade entered by the instructor
+                            break
+                existing_grade = self.existing_grades.get(student_id)
+                if grade is not None:
+                    if existing_grade is None:
+                        # Insert grade for the student if it does not exist
+                        if grade:
+                            course_id = self.c.execute("SELECT course_id FROM section WHERE section_id = ?",(section_id,))
+                            course_id = self.c.fetchone()[0]  # Fetch the course_id from the cursor
+                            self.c.execute("INSERT INTO grade (student_id, course_id, section_id, grade) VALUES (?, ?, ?,?)", (student_id, course_id,section_id, grade))
+                    elif grade != existing_grade:
+                        # Update grade for the student if modified
+                        course_id = self.c.execute("SELECT course_id FROM section WHERE section_id = ?",(section_id,))
+                        course_id = self.c.fetchone()[0]  # Fetch the course_id from the cursor
+                        self.c.execute("UPDATE grade SET grade=? WHERE student_id=? AND course_id=? AND section_id=?", (grade, student_id, course_id,section_id))
+            self.conn.commit()
+            messagebox.showinfo("Success", "Grades added successfully.")
+        except sqlite3.Error as e:
+            messagebox.showerror("Error", f"Error adding grades: {e}")
+
+    def logout(self):
+        self.root.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\login_register.py'])
+
+    def back(self):
+        self.root.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\instructor_dashboard.py', self.instructor_id], check=True)
+
+    def validate_grade(self, new_value):
+        # Validation function for grade entry
+        valid_grades = ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'E']
+        if new_value in valid_grades or new_value == "":
+            return True
+        else:
+            messagebox.showerror("Error", "Invalid grade. Please enter one of: A, A-, B+, B, B-, C+, C, C-, D+, D, D-, E")
+            return False
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.geometry("800x600")
+    root.state('zoomed')
+    root.configure(bg="#00415a")
+    # Retrieving the username from command-line arguments
+    if len(sys.argv) >= 2:
+        instructor_id = sys.argv[1]
+        print(f"Username received in inst_grade: {instructor_id}")
+    else:
+        instructor_id = 'kumar1v'
+    app = InstructorGradeApp(root, instructor_id)
+    root.mainloop()
+
+**********************************************************************************************************************************************************************************
+Student Grade(student_grade.py)
+**********************************************************************************************************************************************************************************
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+import sys
+import subprocess
+
+class StudentGradeApp:
+    def __init__(self, root, username):
+        self.root = root
+        self.root.title("Student Grade Checker")
+        self.root.geometry("800x600")
+        self.root.configure(bg="#00415a")
+        # Connect to SQLite3 database
+        self.conn = sqlite3.connect('user.db')
+        self.c = self.conn.cursor()
+
+        self.username = username
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        self.root.style = ttk.Style()
+        self.root.style.theme_use("clam")  # Use the "clam" theme
+
+        # Configure style for Treeview widget
+        self.root.style.configure("NoBorder.Treeview",
+                             background="#00415a",  # Background color
+                             foreground="black",  # Font color
+                             fieldbackground="#00415a",
+                             font=("Helvetica", 12))
+        self.root.style.configure("NoBorder.Treeview.Heading",
+                             background="#00415a",  # Heading background color
+                             foreground="white",  # Heading font color
+                             font=("Helvetica", 12, "bold"))
+        
+        self.tree = ttk.Treeview(self.root, columns=('Course', 'Instructor', 'Credits', 'Grade'), show="headings", height=24, style="NoBorder.Treeview")
+        self.tree.heading('Course', text='Course')
+        self.tree.heading('Instructor', text='Instructor')
+        self.tree.heading('Credits', text='Credits')
+        self.tree.heading('Grade', text='Grade')
+
+        self.tree.column('Course', width=150)
+        self.tree.column('Instructor', width=110)
+        self.tree.column('Credits', width=110)
+        self.tree.column('Grade', width=110)
+
+        self.tree.place(relx=0.01, rely=0.01, relwidth=0.98, relheight=0.85)
+
+        self.back_button = tk.Button(self.root, text="Back", command=self.back, bg='#87CEEB')
+        self.back_button.place(relx=0.78, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        self.logout_button = tk.Button(self.root, text="Logout", command=self.logout, bg='#87CEEB')
+        self.logout_button.place(relx=0.89, rely=0.9, relwidth=0.1, relheight=0.05)
+        
+        self.grade_details = tk.Button(self.root, text="View Grade Details", command=self.view_grade_details, bg='#87CEEB')
+        self.grade_details.place(relx=0.03, rely=0.9, relwidth=0.1, relheight=0.05)
+
+        # Populate course treeview
+        self.populate_course_treeview()
+
+    def populate_course_treeview(self):
+        try:
+            student_id = self.username
+            courses = self.c.execute('''SELECT course.course_name, users.first_name || ' ' || users.last_name, course.credits, grade.grade 
+                    FROM course 
+                    JOIN section ON course.course_id = section.course_id 
+                    JOIN users ON section.instructor_id = users.user_id 
+                    LEFT JOIN grade ON section.section_id = grade.section_id AND grade.student_id = ?
+                    JOIN course_reg ON section.section_id = course_reg.section_id 
+                    WHERE course_reg.student_id=? AND course_reg.status = 'y' ''', (student_id, student_id)).fetchall()
+            tag = "even"
+            for course in courses:
+                self.tree.insert('', 'end', values=(course[0], course[1], course[2], course[3] if course[3] else 'N/A'), tags=(tag,))
+                tag = "odd" if tag == "even" else "even"
+            self.tree.tag_configure("even", background="#f2f2f2")
+            self.tree.tag_configure("odd", background="#ffffff")
+        except sqlite3.Error as e:
+            messagebox.showerror("Error", f"Error fetching courses: {e}")
+
+    def logout(self):
+        self.root.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\login_register.py'])
+
+    def back(self):
+        self.root.destroy()
+        subprocess.run(['python', 'E:\cmu\BIS 698\misc code\student_dashboard.py', self.username], check=True)
+
+    def view_grade_details(self):
+        popup = tk.Toplevel(self.root)
+        popup.title("Grade Details")
+        # popup.geometry("400x300")
+        popup.configure(bg="#00415a")
+        grade_data = {
+            "A": {"gpa": 4.0, "percentage_range": "(90-100)"},
+            "A-": {"gpa": 3.7, "percentage_range": "(85-89)"},
+            "B+": {"gpa": 3.3, "percentage_range": "(80-84)"},
+            "B": {"gpa": 3.0, "percentage_range": "(75-79)"},
+            "B-": {"gpa": 2.7, "percentage_range": "(70-74)"},
+            "C+": {"gpa": 2.3, "percentage_range": "(65-69)"},
+            "C": {"gpa": 2.0, "percentage_range": "(60-64)"},
+            "C-": {"gpa": 1.7, "percentage_range": "(55-59)"},
+            "D+": {"gpa": 1.3, "percentage_range": "(50-54)"},
+            "D": {"gpa": 1.0, "percentage_range": "(45-49)"},
+            "D-": {"gpa": 0.7, "percentage_range": "(40-44)"},
+            "E": {"gpa": 0.0, "percentage_range": "(Below 40)"}
+        }
+        grade_details_label = tk.Label(popup, text="Grade Details", font=('Arial', 14, 'bold'), foreground="white", background="#00415a")
+        grade_details_label.grid(row=0,column=1,sticky=tk.W)
+        tk.Label(popup, text="Grade", font=('Arial', 10, 'bold'), foreground="white", background="#00415a").grid(row=1, column=0, padx=10, pady=5)
+        tk.Label(popup, text="GPA", font=('Arial', 10, 'bold'), foreground="white", background="#00415a").grid(row=1, column=1, padx=10, pady=5)
+        tk.Label(popup, text="Percentage Range", font=('Arial', 10, 'bold'), foreground="white", background="#00415a").grid(row=1, column=2, padx=10, pady=5)
+        grade_labels = ['A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'E']
+        for i, grade in enumerate(grade_labels):
+            grade_label = tk.Label(popup, text=grade, font=('Arial', 10), foreground="white", background="#00415a")
+            grade_label.grid(row=i+2, column=0, padx=20, pady=5)
+
+            # Add corresponding GPA
+            gpa_label = tk.Label(popup, text=grade_data[grade]["gpa"], font=('Arial', 10), foreground="white", background="#00415a")
+            gpa_label.grid(row=i+2, column=1, padx=20, pady=5)
+
+            # Add corresponding percentage range
+            percentage_label = tk.Label(popup, text=grade_data[grade]["percentage_range"], font=('Arial', 10), foreground="white", background="#00415a")
+            percentage_label.grid(row=i+2, column=2, padx=20, pady=5)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.state('zoomed')
+    if len(sys.argv) >= 2:
+        username = sys.argv[1]
+        print(f"Username received in grade_student: {username}")
+    else:
+        username= 'musuk2s'
+    app = StudentGradeApp(root, username)
+    root.mainloop()
